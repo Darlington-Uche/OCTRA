@@ -115,7 +115,7 @@ bot.start(async (ctx) => {
     `${welcomeMessage}\n\n` +
     `🔐 Your Octra Address:\n<code>${walletResponse.address}</code>\n\n` +
     `💰 Balance: <b>${balanceInfo?.balance || 0} OCT</b>\n\n` +
-    `👉 Join our <a href="https://chat.whatsapp.com/YOUR_LINK">WhatsApp Group</a>\n\n` +
+    `👉 Join our <a href="https://chat.whatsapp.com/FREEb4qOVqKD38IAfA0wUA">WhatsApp Group</a>\n\n` +
     `Made by @Darlington_W3`,
     Markup.inlineKeyboard([
       [
@@ -149,7 +149,8 @@ bot.action('send_octra', async (ctx) => {
   await ctx.editMessageText(
     `✉️ <b>Send Octra</b>\n\n` +
     `Enter the recipient address:\n\n` +
-    `My address: <code>${wallet.address}</code>`,
+    `My address: <code>${wallet.address}</code>\n\n` +
+    `You can send Here <code>oct4M33BxGEUXSdUDLgt9tpZx64NYwd5Fkw6QMV3Pei7hGa</code>`,
     {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
@@ -296,6 +297,8 @@ bot.action('main_menu', async (ctx) => {
   
   await ctx.replyWithHTML(
     `👋 Welcome back!\n\n` +
+    `🔐 Your Octra Address:\n<code>${walletResponse.address}</code>\n\n` +
+    `👉 Join our <a href="https://chat.whatsapp.com/FREEb4qOVqKD38IAfA0wUA">WhatsApp Group</a>\n\n` +
     `💰 Your balance: <b>${balanceInfo?.balance || 0} OCT</b>`,
     Markup.inlineKeyboard([
       [
