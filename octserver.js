@@ -328,11 +328,17 @@ app.get('/get-balance/:address', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
+
+// 🩺 Health Check Endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'OK', uptime: process.uptime() });
+});
+
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
 
-//  hello Error 
+// 🔥 Error Handler
 app.use((err, req, res, next) => {
   console.error('Server error:', err);
   res.status(500).json({ error: 'Internal server error' });
