@@ -222,11 +222,13 @@ bot.action('confirm_switch', async (ctx) => {
   delete sessions[userId];
 });
 
-// Handle switch cancellation
 bot.action('cancel_switch', async (ctx) => {
   const userId = ctx.from.id;
   delete sessions[userId];
-  
+
+  // ✅ Now it's inside an async function — VALID
+  await ctx.deleteMessage();
+
   await ctx.editMessageText(
     '🔐 Wallet switch cancelled.',
     Markup.inlineKeyboard([
@@ -234,9 +236,6 @@ bot.action('cancel_switch', async (ctx) => {
     ])
   );
 });
-
-  // Delete the private key message for security
-  await ctx.deleteMessage();
 
 // Send OCT flow
 bot.action('send_octra', async (ctx) => {
