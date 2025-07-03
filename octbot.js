@@ -312,56 +312,63 @@ bot.action('main_menu', async (ctx) => {
     ])
   );
 });
-// Transaction History Handler
+// Transaction History Handler - FIXED
 bot.action('tx_history', async (ctx) => {
   try {
     const userId = String(ctx.from.id);
-    
-    // Show loading state
     await ctx.answerCbQuery('Fetching transactions...');
     
-    // Get wallet address
     const wallet = await callAPI(`/get-user-info/${userId}`);
-    if (!wallet) {
-      return ctx.reply('❌ Failed to load your wallet address');
+    if (!wallet?.address) {
+      return ctx.reply('❌ Wallet address not found');
     }
 
-    // Get transactions
     const txData = await callAPI(`/get-transactions/${wallet.address}`);
     
     if (!txData?.transactions?.length) {
       return ctx.replyWithHTML(
         `📜 <b>Transaction History</b>\n\n` +
-        `No transactions found for your address:\n` +
-        `<code>${wallet.address}</code>`
+        `No transactions found for:\n<code>${wallet.address}</code>`
       );
     }
 
-    // Format transactions for display
+    // Safe date formatting
+    const formatDate = (isoString) => {
+      try {
+        return isoString === 'Unknown' ? 'Unknown' : 
+          new Date(isoString).toLocaleString();
+      } catch {
+        return 'Invalid Date';
+      }
+    };
+
     const formattedTxs = txData.transactions.map((tx, i) => {
       const direction = tx.to === wallet.address ? '⬇️ IN' : '⬆️ OUT';
       const counterparty = tx.to === wallet.address ? tx.from : tx.to;
       return (
         `\n${i+1}. ${direction} ${tx.amount} OCT\n` +
-        `   ${counterparty}\n` +
-        `   ${new Date(tx.timestamp).toLocaleString()}`
+        `   ${counterparty.slice(0, 12)}...${counterparty.slice(-4)}\n` +
+        `   ${formatDate(tx.timestamp)}`
       );
     }).join('\n');
 
     await ctx.replyWithHTML(
-      `📜 <b>Last 5 Transactions</b>\n\n` +
-      `For address:\n<code>${wallet.address}</code>\n\n` +
+      `📜 <b>Last ${txData.transactions.length} Transactions</b>\n\n` +
+      `Address: <code>${wallet.address}</code>\n\n` +
       `${formattedTxs}\n\n` +
-      `Full history: octrascan.io/address/${wallet.address}`,
-      Markup.inlineKeyboard([
-        [Markup.button.callback('🔄 Refresh', 'tx_history')],
-        [Markup.button.callback('🏠 Main Menu', 'main_menu')]
-      ])
+      `<a href="https://octrascan.io/address/${wallet.address}">View full history</a>`,
+      {
+        disable_web_page_preview: true,
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🔄 Refresh', 'tx_history')],
+          [Markup.button.callback('🏠 Menu', 'main_menu')]
+        ])
+      }
     );
 
   } catch (error) {
     console.error('TX History Error:', error);
-    await ctx.reply('❌ Failed to load transaction history. Please try again later.');
+    await ctx.reply('❌ Failed to load transactions. Please try again later.');
   }
 });
 // Other menu buttons (placeholders)
