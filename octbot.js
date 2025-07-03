@@ -117,19 +117,120 @@ bot.start(async (ctx) => {
     `💰 Balance: <b>${balanceInfo?.balance || 0} OCT</b>\n\n` +
     `👉 Join our <a href="https://chat.whatsapp.com/FREEb4qOVqKD38IAfA0wUA">WhatsApp Group</a>\n\n` +
     `Made by @Darlington_W3`,
+Markup.inlineKeyboard([
+  [
+    Markup.button.callback('💸 Send OCT', 'send_octra'),
+    Markup.button.callback('📜 Transactions', 'tx_history')
+  ],
+  [
+    Markup.button.callback('🔑 Switch Wallet', 'switch_wallet'),
+    Markup.button.callback('🆘 Support', 'support')
+  ],
+  [
+    Markup.button.callback('⭐ Premium', 'premium')
+  ]
+])
+  );
+});
+
+// Handle switch wallet button
+bot.action('switch_wallet', async (ctx) => {
+  await ctx.editMessageText(
+    '🔑 <b>Switch Wallet</b>\n\n' +
+    'To switch to a different wallet, please send me your private key.\n\n' +
+    '⚠️ <b>Warning:</b> This will replace your current wallet credentials.\n' +
+    'The bot will not store your private key after the switch is complete.',
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('🚫 Cancel', 'main_menu')]
+      ])
+    }
+  );
+  
+  // Set session state
+  const userId = ctx.from.id;
+  sessions[userId] = { step: 'await_private_key' };
+});
+
+// Add this to your existing text handler (bot.on('text'))
+else if (session.step === 'await_private_key') {
+  const privateKey = ctx.message.text.trim();
+  const userId = ctx.from.id;
+  
+  // Basic validation (adjust according to your blockchain's private key format)
+  if (!privateKey || privateKey.length < 30) {
+    return ctx.reply('❌ Invalid private key format. Please try again.');
+  }
+  
+  // Show confirmation
+  await ctx.replyWithHTML(
+    '⚠️ <b>Confirm Wallet Switch</b>\n\n' +
+    'You are about to replace your current wallet with a new one.\n\n' +
+    'This action cannot be undone!',
     Markup.inlineKeyboard([
       [
-        Markup.button.callback('💸 Send OCT', 'send_octra'),
-        Markup.button.callback('📜 Transactions', 'tx_history')
-      ],
-      [
-        Markup.button.callback('🆘 Support', 'support'),
-        Markup.button.callback('⭐ Premium', 'premium')
+        Markup.button.callback('✅ Confirm Switch', `confirm_switch:${privateKey}`),
+        Markup.button.callback('🚫 Cancel', 'cancel_switch')
       ]
+    ])
+  );
+  // Handle switch confirmation
+bot.action(/confirm_switch:(.+)/, async (ctx) => {
+  const privateKey = ctx.match[1];
+  const userId = ctx.from.id;
+  
+  // Show processing message
+  await ctx.editMessageText('⏳ Processing wallet switch...');
+  
+  // Call your API to switch wallets
+  const result = await callAPI('/switch-wallet', 'post', {
+    userId,
+    privateKey
+  });
+  
+  if (result?.success) {
+    await ctx.editMessageText(
+      '✅ <b>Wallet Successfully Switched!</b>\n\n' +
+      `New address: <code>${result.address}</code>\n\n` +
+      'Please make sure to securely store your private key.',
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🏠 Main Menu', 'main_menu')]
+        ])
+      }
+    );
+  } else {
+    await ctx.editMessageText(
+      '❌ Failed to switch wallets:\n' +
+      (result?.error || 'Unknown error'),
+      Markup.inlineKeyboard([
+        [Markup.button.callback('🏠 Main Menu', 'main_menu')]
+      ])
+    );
+  }
+  
+  // Clear session
+  delete sessions[userId];
+});
+
+// Handle switch cancellation
+bot.action('cancel_switch', async (ctx) => {
+  const userId = ctx.from.id;
+  delete sessions[userId];
+  
+  await ctx.editMessageText(
+    '🔐 Wallet switch cancelled.',
+    Markup.inlineKeyboard([
+      [Markup.button.callback('🏠 Main Menu', 'main_menu')]
     ])
   );
 });
 
+  // Delete the private key message for security
+  await ctx.deleteMessage();
+}
 // Send OCT flow
 bot.action('send_octra', async (ctx) => {
   const userId = ctx.from.id;
