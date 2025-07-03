@@ -114,8 +114,7 @@ app.post('/create-wallet', async (req, res) => {
 });
 
 
-
-//2. Get User Info Endpoint
+// Update your existing get-user-info endpoint
 app.get('/get-user-info/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
@@ -126,12 +125,13 @@ app.get('/get-user-info/:userId', async (req, res) => {
     }
 
     const walletData = doc.data();
-    
-    // Don't return private key or mnemonic in normal info request
+
+    // Return slightly different data for imported wallets
     const response = {
       address: walletData.address,
       publicKey: walletData.publicKey,
-      createdAt: walletData.createdAt
+      createdAt: walletData.createdAt,
+      isImported: !walletData.mnemonic // Flag to indicate if this is an imported wallet
     };
 
     res.json(response);
@@ -234,25 +234,29 @@ const doc = await db.collection('wallets').doc(String(userId)).get();
   }
 });
 
-// 4. Get Private Key Endpoint (SECURE - should require authentication)
+// Update your existing get-keys endpoint
 app.get('/get-keys/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
-    // In production, you should verify authentication here
-    
+    // Add authentication checks here in production
+
     const doc = await db.collection('wallets').doc(String(userId)).get();
     if (!doc.exists) {
       return res.status(404).json({ error: 'Wallet not found' });
     }
 
     const walletData = doc.data();
-    
-    // Only return sensitive data to authenticated user
+
     const response = {
-      mnemonic: walletData.mnemonic,
       privateKey: walletData.privateKey,
-      address: walletData.address
+      address: walletData.address,
+      hasMnemonic: !!walletData.mnemonic // Indicate if mnemonic exists
     };
+
+    // Only include mnemonic if it exists (not for imported wallets)
+    if (walletData.mnemonic) {
+      response.mnemonic = walletData.mnemonic;
+    }
 
     res.json(response);
   } catch (error) {
