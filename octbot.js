@@ -127,7 +127,7 @@ Markup.inlineKeyboard([
     Markup.button.callback('🆘 Support', 'support')
   ],
   [
-    Markup.button.callback('⭐ Premium', 'premium')
+    Markup.button.callback('💫Auto Transaction', 'premium')
   ]
 ])
   );
