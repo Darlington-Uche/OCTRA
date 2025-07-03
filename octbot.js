@@ -312,9 +312,60 @@ bot.action('main_menu', async (ctx) => {
     ])
   );
 });
+// Transaction History Handler
+bot.action('tx_history', async (ctx) => {
+  try {
+    const userId = String(ctx.from.id);
+    
+    // Show loading state
+    await ctx.answerCbQuery('Fetching transactions...');
+    
+    // Get wallet address
+    const wallet = await callAPI(`/get-user-info/${userId}`);
+    if (!wallet) {
+      return ctx.reply('❌ Failed to load your wallet address');
+    }
 
+    // Get transactions
+    const txData = await callAPI(`/get-transactions/${wallet.address}`);
+    
+    if (!txData?.transactions?.length) {
+      return ctx.replyWithHTML(
+        `📜 <b>Transaction History</b>\n\n` +
+        `No transactions found for your address:\n` +
+        `<code>${wallet.address}</code>`
+      );
+    }
+
+    // Format transactions for display
+    const formattedTxs = txData.transactions.map((tx, i) => {
+      const direction = tx.to === wallet.address ? '⬇️ IN' : '⬆️ OUT';
+      const counterparty = tx.to === wallet.address ? tx.from : tx.to;
+      return (
+        `\n${i+1}. ${direction} ${tx.amount} OCT\n` +
+        `   ${counterparty}\n` +
+        `   ${new Date(tx.timestamp).toLocaleString()}`
+      );
+    }).join('\n');
+
+    await ctx.replyWithHTML(
+      `📜 <b>Last 5 Transactions</b>\n\n` +
+      `For address:\n<code>${wallet.address}</code>\n\n` +
+      `${formattedTxs}\n\n` +
+      `Full history: octrascan.io/address/${wallet.address}`,
+      Markup.inlineKeyboard([
+        [Markup.button.callback('🔄 Refresh', 'tx_history')],
+        [Markup.button.callback('🏠 Main Menu', 'main_menu')]
+      ])
+    );
+
+  } catch (error) {
+    console.error('TX History Error:', error);
+    await ctx.reply('❌ Failed to load transaction history. Please try again later.');
+  }
+});
 // Other menu buttons (placeholders)
-bot.action(['tx_history', 'support', 'premium'], async (ctx) => {
+bot.action(['x', 'support', 'premium'], async (ctx) => {
   await ctx.answerCbQuery('🚧 Feature coming soon!');
 });
 
