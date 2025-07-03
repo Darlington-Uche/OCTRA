@@ -237,7 +237,7 @@ bot.action('cancel_switch', async (ctx) => {
 
   // Delete the private key message for security
   await ctx.deleteMessage();
-}
+
 // Send OCT flow
 bot.action('send_octra', async (ctx) => {
   const userId = ctx.from.id;
