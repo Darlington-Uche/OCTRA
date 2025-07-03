@@ -1,10 +1,8 @@
 {
   "name": "octra",
   "version": "1.0.0",
-  "description": "Telegram bot ",
- {
-  "type": "commonjs"
-},
+  "description": "Telegram bot",
+  "type": "commonjs",
   "main": "octbot.js",
   "scripts": {
     "start": "node octbot.js"
