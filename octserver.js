@@ -326,48 +326,53 @@ app.get('/get-balance/:address', async (req, res) => {
     });
   }
 });
-// 6. Get Latest Transactions Endpoint
+// 6. Get Latest Transactions Endpoint - FIXED TIMESTAMP HANDLING
 app.get('/get-transactions/:address', async (req, res) => {
   try {
     const { address } = req.params;
     
-    // Fetch recent transactions from Octra network
     const response = await axios.get(`${RPC_ENDPOINT}/address/${address}?limit=5`);
     
     if (!response.data?.recent_transactions) {
       return res.json({
         success: true,
         address,
-        transactions: [],
-        message: 'No transactions found'
+        transactions: []
       });
     }
 
-    // Format transactions
+    // Safe timestamp formatting
+    const formatTimestamp = (ts) => {
+      try {
+        return ts ? new Date(ts * 1000).toISOString() : 'Unknown';
+      } catch {
+        return 'Invalid Date';
+      }
+    };
+
     const transactions = response.data.recent_transactions.map(tx => ({
-      from: tx.from,
-      to: tx.to,
+      from: tx.from || 'Unknown',
+      to: tx.to || 'Unknown',
       amount: parseFloat(tx.amount) || 0,
-      timestamp: new Date(tx.timestamp * 1000).toISOString(),
-      hash: tx.hash
-    }));
+      timestamp: formatTimestamp(tx.timestamp),
+      hash: tx.hash || 'Unknown'
+    })).filter(tx => tx.from && tx.to); // Filter out invalid entries
 
     res.json({
       success: true,
       address,
-      transactions: transactions.slice(0, 5) // Ensure max 5 transactions
+      transactions: transactions.slice(0, 5)
     });
 
   } catch (error) {
-    console.error('Transaction fetch error:', error);
+    console.error('Transaction fetch error:', error.message);
     res.status(500).json({
       success: false,
       error: 'Failed to fetch transactions',
-      details: error.message
+      details: error.response?.data || error.message
     });
   }
 });
-
 const PORT = process.env.PORT || 3000;
 
 // 🩺 Health Check Endpoint
