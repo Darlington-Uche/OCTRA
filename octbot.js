@@ -153,28 +153,6 @@ bot.action('switch_wallet', async (ctx) => {
   sessions[userId] = { step: 'await_private_key' };
 });
 
-// Add this to your existing text handler (bot.on('text'))
-else if (session.step === 'await_private_key') {
-  const privateKey = ctx.message.text.trim();
-  const userId = ctx.from.id;
-  
-  // Basic validation (adjust according to your blockchain's private key format)
-  if (!privateKey || privateKey.length < 30) {
-    return ctx.reply('❌ Invalid private key format. Please try again.');
-  }
-  
-  // Show confirmation
-  await ctx.replyWithHTML(
-    '⚠️ <b>Confirm Wallet Switch</b>\n\n' +
-    'You are about to replace your current wallet with a new one.\n\n' +
-    'This action cannot be undone!',
-    Markup.inlineKeyboard([
-      [
-        Markup.button.callback('✅ Confirm Switch', `confirm_switch:${privateKey}`),
-        Markup.button.callback('🚫 Cancel', 'cancel_switch')
-      ]
-    ])
-  );
   // Handle switch confirmation
 bot.action(/confirm_switch:(.+)/, async (ctx) => {
   const privateKey = ctx.match[1];
@@ -287,10 +265,30 @@ bot.on('text', async (ctx) => {
         [Markup.button.callback('🚫 Cancel', 'cancel_tx')]
       ])
     );
-    
-    // Delete previous message
     await ctx.deleteMessage();
   } 
+else if (session.step === 'await_private_key') {
+  const privateKey = ctx.message.text.trim();
+  const userId = ctx.from.id;
+  
+  // Basic validation (adjust according to your blockchain's private key format)
+  if (!privateKey || privateKey.length < 30) {
+    return ctx.reply('❌ Invalid private key format. Please try again.');
+  }
+  
+  // Show confirmation
+  await ctx.replyWithHTML(
+    '⚠️ <b>Confirm Wallet Switch</b>\n\n' +
+    'You are about to replace your current wallet with a new one.\n\n' +
+    'This action cannot be undone!',
+    Markup.inlineKeyboard([
+      [
+        Markup.button.callback('✅ Confirm Switch', `confirm_switch:${privateKey}`),
+        Markup.button.callback('🚫 Cancel', 'cancel_switch')
+      ]
+    ])
+  );
+}
   else if (session.step === 'await_amount') {
     const amount = parseFloat(ctx.message.text);
     
