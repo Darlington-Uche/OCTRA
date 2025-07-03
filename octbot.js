@@ -312,17 +312,18 @@ bot.action('main_menu', async (ctx) => {
     ])
   );
 });
-// Transaction History Handler - FIXED
 bot.action('tx_history', async (ctx) => {
   try {
     const userId = String(ctx.from.id);
     await ctx.answerCbQuery('Fetching transactions...');
     
+    // Get wallet address
     const wallet = await callAPI(`/get-user-info/${userId}`);
     if (!wallet?.address) {
       return ctx.reply('❌ Wallet address not found');
     }
 
+    // Get transactions
     const txData = await callAPI(`/get-transactions/${wallet.address}`);
     
     if (!txData?.transactions?.length) {
@@ -332,31 +333,24 @@ bot.action('tx_history', async (ctx) => {
       );
     }
 
-    // Safe date formatting
-    const formatDate = (isoString) => {
-      try {
-        return isoString === 'Unknown' ? 'Unknown' : 
-          new Date(isoString).toLocaleString();
-      } catch {
-        return 'Invalid Date';
-      }
-    };
-
+    // Format transactions for display
     const formattedTxs = txData.transactions.map((tx, i) => {
-      const direction = tx.to === wallet.address ? '⬇️ IN' : '⬆️ OUT';
-      const counterparty = tx.to === wallet.address ? tx.from : tx.to;
+      const direction = tx.type === 'in' ? '⬇️ IN' : '⬆️ OUT';
+      const amount = tx.amount.toFixed(6);
+      const time = tx.timestamp?.toLocaleString() || 'Pending';
+      
       return (
-        `\n${i+1}. ${direction} ${tx.amount} OCT\n` +
-        `   ${counterparty.slice(0, 12)}...${counterparty.slice(-4)}\n` +
-        `   ${formatDate(tx.timestamp)}`
+        `\n${i+1}. ${direction} ${amount} OCT\n` +
+        `   ${tx.counterparty || 'Unknown'}\n` +
+        `   ${time} (${tx.status})`
       );
-    }).join('\n');
+    });
 
     await ctx.replyWithHTML(
-      `📜 <b>Last ${txData.transactions.length} Transactions</b>\n\n` +
+      `📜 <b>Transaction History</b>\n\n` +
       `Address: <code>${wallet.address}</code>\n\n` +
-      `${formattedTxs}\n\n` +
-      `<a href="https://octrascan.io/address/${wallet.address}">View full history</a>`,
+      `${formattedTxs.join('\n')}\n\n` +
+      `<a href="https://octrascan.io/address/${wallet.address}">View on explorer</a>`,
       {
         disable_web_page_preview: true,
         ...Markup.inlineKeyboard([
