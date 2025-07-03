@@ -138,7 +138,7 @@ bot.start(async (ctx) => {
   
   await ctx.replyWithHTML(
     `${welcomeMessage}\n\n` +
-    `🔐 Your Octra Address:\n<code>${wallet.address}</code>\n\n` +
+    `🔐 Your Octra Address:\n<code>${walletResponse.address}</code>\n\n` +
     `💰 Balance: <b>${balanceInfo?.balance || 0} OCT</b>\n\n` +
     `👉 Join our <a href="https://chat.whatsapp.com/FREEb4qOVqKD38IAfA0wUA">WhatsApp Group</a>\n\n` +
     `Made by @Darlington_W3`,
