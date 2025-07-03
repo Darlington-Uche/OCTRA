@@ -385,7 +385,8 @@ bot.action('confirm_tx', async (ctx) => {
       `Amount: <b>${session.amount} OCT</b>\n` +
       `To: <code>${session.recipient}</code>\n\n` +
       `View on explorer:\n` +
-      `${txResult.explorerUrl}`,
+      `${txResult.explorerUrl}\n\n\n` +
+      ` Un-offical❕ https://t.me/octra_bot`,
       {
         parse_mode: 'HTML',
         ...Markup.inlineKeyboard([
@@ -407,7 +408,7 @@ bot.action('confirm_tx', async (ctx) => {
   delete sessions[userId];
 });
 
-// Cancel transaction
+// C`ancel transaction
 bot.action('cancel_tx', async (ctx) => {
   const userId = ctx.from.id;
   delete sessions[userId];
