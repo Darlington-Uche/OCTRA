@@ -326,6 +326,47 @@ app.get('/get-balance/:address', async (req, res) => {
     });
   }
 });
+// 6. Get Latest Transactions Endpoint
+app.get('/get-transactions/:address', async (req, res) => {
+  try {
+    const { address } = req.params;
+    
+    // Fetch recent transactions from Octra network
+    const response = await axios.get(`${RPC_ENDPOINT}/address/${address}?limit=5`);
+    
+    if (!response.data?.recent_transactions) {
+      return res.json({
+        success: true,
+        address,
+        transactions: [],
+        message: 'No transactions found'
+      });
+    }
+
+    // Format transactions
+    const transactions = response.data.recent_transactions.map(tx => ({
+      from: tx.from,
+      to: tx.to,
+      amount: parseFloat(tx.amount) || 0,
+      timestamp: new Date(tx.timestamp * 1000).toISOString(),
+      hash: tx.hash
+    }));
+
+    res.json({
+      success: true,
+      address,
+      transactions: transactions.slice(0, 5) // Ensure max 5 transactions
+    });
+
+  } catch (error) {
+    console.error('Transaction fetch error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch transactions',
+      details: error.message
+    });
+  }
+});
 
 const PORT = process.env.PORT || 3000;
 
