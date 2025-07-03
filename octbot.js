@@ -25,6 +25,31 @@ const LOCAL_SERVER_URL = process.env.SERVER; // Your local server URL
 
 // Session storage for transaction flow
 const sessions = {};
+// Add this at the top with your other constants
+const SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutes
+
+// Add this function to clean up old sessions
+function cleanupSessions() {
+  const now = Date.now();
+  for (const userId in sessions) {
+    if (sessions[userId].lastActivity && now - sessions[userId].lastActivity > SESSION_TIMEOUT) {
+      delete sessions[userId];
+    }
+  }
+}
+
+// Update session access to track activity
+function getSession(userId) {
+  if (!sessions[userId]) {
+    sessions[userId] = { lastActivity: Date.now() };
+  } else {
+    sessions[userId].lastActivity = Date.now();
+  }
+  return sessions[userId];
+}
+
+// Run cleanup every hour
+setInterval(cleanupSessions, 60 * 60 * 1000);
 
 // Update the callAPI function to better handle errors
 async function callAPI(endpoint, method = 'get', data = {}) {
@@ -113,7 +138,7 @@ bot.start(async (ctx) => {
   
   await ctx.replyWithHTML(
     `${welcomeMessage}\n\n` +
-    `🔐 Your Octra Address:\n<code>${walletResponse.address}</code>\n\n` +
+    `🔐 Your Octra Address:\n<code>${wallet.address}</code>\n\n` +
     `💰 Balance: <b>${balanceInfo?.balance || 0} OCT</b>\n\n` +
     `👉 Join our <a href="https://chat.whatsapp.com/FREEb4qOVqKD38IAfA0wUA">WhatsApp Group</a>\n\n` +
     `Made by @Darlington_W3`,
@@ -153,20 +178,24 @@ bot.action('switch_wallet', async (ctx) => {
   sessions[userId] = { step: 'await_private_key' };
 });
 
-  // Handle switch confirmation
-bot.action(/confirm_switch:(.+)/, async (ctx) => {
-  const privateKey = ctx.match[1];
+// Handle switch confirmation
+bot.action('confirm_switch', async (ctx) => {
   const userId = ctx.from.id;
-  
+  const session = sessions[userId];
+
+  if (!session?.privateKey) {
+    return ctx.editMessageText('❌ No private key found in session');
+  }
+
   // Show processing message
   await ctx.editMessageText('⏳ Processing wallet switch...');
-  
+
   // Call your API to switch wallets
   const result = await callAPI('/switch-wallet', 'post', {
     userId,
-    privateKey
+    privateKey: session.privateKey
   });
-  
+
   if (result?.success) {
     await ctx.editMessageText(
       '✅ <b>Wallet Successfully Switched!</b>\n\n' +
@@ -188,7 +217,7 @@ bot.action(/confirm_switch:(.+)/, async (ctx) => {
       ])
     );
   }
-  
+
   // Clear session
   delete sessions[userId];
 });
@@ -266,16 +295,20 @@ bot.on('text', async (ctx) => {
       ])
     );
     await ctx.deleteMessage();
-  } 
+}
+
 else if (session.step === 'await_private_key') {
   const privateKey = ctx.message.text.trim();
   const userId = ctx.from.id;
-  
+
   // Basic validation (adjust according to your blockchain's private key format)
   if (!privateKey || privateKey.length < 30) {
     return ctx.reply('❌ Invalid private key format. Please try again.');
   }
-  
+
+  // Store private key in session for confirmation
+  sessions[userId].privateKey = privateKey;
+
   // Show confirmation
   await ctx.replyWithHTML(
     '⚠️ <b>Confirm Wallet Switch</b>\n\n' +
@@ -283,11 +316,14 @@ else if (session.step === 'await_private_key') {
     'This action cannot be undone!',
     Markup.inlineKeyboard([
       [
-        Markup.button.callback('✅ Confirm Switch', `confirm_switch:${privateKey}`),
+        Markup.button.callback('✅ Confirm Switch', 'confirm_switch'),
         Markup.button.callback('🚫 Cancel', 'cancel_switch')
       ]
     ])
   );
+  
+  // Delete the private key message for security
+  await ctx.deleteMessage();
 }
   else if (session.step === 'await_amount') {
     const amount = parseFloat(ctx.message.text);
@@ -464,6 +500,7 @@ bot.action('tx_history', async (ctx) => {
     await ctx.reply('❌ Failed to load transactions. Please try again later.');
   }
 });
+
 // Other menu buttons (placeholders)
 bot.action(['x', 'support', 'premium'], async (ctx) => {
   await ctx.answerCbQuery('🚧 Feature coming soon!');
