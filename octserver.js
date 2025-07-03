@@ -326,14 +326,15 @@ app.get('/get-balance/:address', async (req, res) => {
     });
   }
 });
-// 6. Get Latest Transactions Endpoint - FIXED TIMESTAMP HANDLING
+// Updated Transaction History Endpoint
 app.get('/get-transactions/:address', async (req, res) => {
   try {
     const { address } = req.params;
     
-    const response = await axios.get(`${RPC_ENDPOINT}/address/${address}?limit=5`);
+    // First get transaction references
+    const { status, data } = await axios.get(`${RPC_ENDPOINT}/address/${address}?limit=5`);
     
-    if (!response.data?.recent_transactions) {
+    if (status !== 200 || !data?.recent_transactions?.length) {
       return res.json({
         success: true,
         address,
@@ -341,35 +342,41 @@ app.get('/get-transactions/:address', async (req, res) => {
       });
     }
 
-    // Safe timestamp formatting
-    const formatTimestamp = (ts) => {
-      try {
-        return ts ? new Date(ts * 1000).toISOString() : 'Unknown';
-      } catch {
-        return 'Invalid Date';
-      }
-    };
+    // Fetch full transaction details for each
+    const txDetails = await Promise.all(
+      data.recent_transactions.map(txRef => 
+        axios.get(`${RPC_ENDPOINT}/tx/${txRef.hash}`).then(r => r.data)
+      )
+    );
 
-    const transactions = response.data.recent_transactions.map(tx => ({
-      from: tx.from || 'Unknown',
-      to: tx.to || 'Unknown',
-      amount: parseFloat(tx.amount) || 0,
-      timestamp: formatTimestamp(tx.timestamp),
-      hash: tx.hash || 'Unknown'
-    })).filter(tx => tx.from && tx.to); // Filter out invalid entries
+    // Format transactions according to Octra's structure
+    const transactions = txDetails.map(tx => {
+      const parsedTx = tx.parsed_tx || {};
+      const isIncoming = parsedTx.to === address;
+      
+      return {
+        hash: tx.hash,
+        type: isIncoming ? 'in' : 'out',
+        amount: parseFloat(parsedTx.amount || 0),
+        counterparty: isIncoming ? parsedTx.from : parsedTx.to,
+        timestamp: parsedTx.timestamp ? new Date(parsedTx.timestamp * 1000) : null,
+        nonce: parsedTx.nonce || 0,
+        status: tx.epoch ? `confirmed (epoch ${tx.epoch})` : 'pending'
+      };
+    });
 
     res.json({
       success: true,
       address,
-      transactions: transactions.slice(0, 5)
+      transactions
     });
 
   } catch (error) {
-    console.error('Transaction fetch error:', error.message);
+    console.error('Transaction fetch error:', error);
     res.status(500).json({
       success: false,
       error: 'Failed to fetch transactions',
-      details: error.response?.data || error.message
+      details: error.message
     });
   }
 });
