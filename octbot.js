@@ -141,7 +141,7 @@ bot.start(async (ctx) => {
     `🔐 Your Octra Address:\n<code>${walletResponse.address}</code>\n\n` +
     `💰 Balance: <b>${balanceInfo?.balance || 0} OCT</b>\n\n` +
     `👉 Join our <a href="https://chat.whatsapp.com/FREEb4qOVqKD38IAfA0wUA">WhatsApp Group</a>\n\n` +
-    `Made by @Darlington_W3\n\n\n`
+    `Made by @Darlington_W3\n\n\n` +
     `Bot is currently slow due to high volume of users the bot will be upgraded soon and more features will be available on open soon ✅`,
 Markup.inlineKeyboard([
   [
