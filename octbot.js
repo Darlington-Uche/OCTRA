@@ -80,9 +80,7 @@ async function getServerWithSpeed(userId) {
 // Modified callAPI to use user's selected server
 async function callAPI(endpoint, method = 'get', data = {}, userId = null) {
   try {
-    const { url } = userId 
-      ? await getServerWithSpeed(userId)
-      : await getLeastBusyServer();
+    const { url } = await getServerWithSpeed(userId);
 
     const config = {
       method,
