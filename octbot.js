@@ -51,7 +51,7 @@ async function getServerWithSpeed(userId) {
       SERVERS.map(async (url) => {
         try {
           const start = Date.now();
-          await axios.get(`${url}/server-status`, { timeout: 10000 });
+          await axios.get(`${url}/server-status`, { timeout: 20000 });
           const speed = Math.min(100, Math.round(1000 / (Date.now() - start)));
           return { url, speed };
         } catch {
@@ -109,7 +109,7 @@ bot.action('switch_server', async (ctx) => {
   // Test speed
   const start = Date.now();
   try {
-    await axios.get(`${nextServer}/server-status`, { timeout: 2000 });
+    await axios.get(`${nextServer}/server-status`, { timeout: 10000 });
     const speed = Math.min(100, Math.round(1000 / (Date.now() - start)));
     userServers.set(userId, { server: nextServer, speed });
     
