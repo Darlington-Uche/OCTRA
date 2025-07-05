@@ -116,52 +116,19 @@ bot.action('switch_server', async (ctx) => {
     // Refresh main menu
     await ctx.answerCbQuery(`Switched to ${SERVER_NAMES[nextServer]} (${speed}% speed)`);
     await ctx.deleteMessage();
-    return bot.action('main_menu', ctx);
+    return showMainMenu(ctx);
   } catch (err) {
     await ctx.answerCbQuery(`⚠️ ${SERVER_NAMES[nextServer]} unavailable, try again`);
   }
 });
 
-// Update your start command to show current server
 bot.start(async (ctx) => {
-  const userId = String(ctx.from.id);
-  const username = ctx.from.username || ctx.from.first_name;
-
-  // Get server info
-  const { name: serverName, speed } = await getServerWithSpeed(userId);
-  
-  // Rest of your existing start command...
-  const walletResponse = await callAPI('/create-wallet', 'post', { userId, username }, userId);
-  
-  if (!walletResponse || walletResponse.error) {
-    return ctx.reply('❌ Failed to access your wallet. Please try again.');
-  }
-
-  const balanceInfo = await callAPI(`/get-balance/${walletResponse.address}`, 'get', {}, userId);
-
-  await ctx.replyWithHTML(
-    `👋 Welcome, <b>${username}</b>!\n\n` +
-    `🔐 Your Octra Address:\n<code>${walletResponse.address}</code>\n\n` +
-    `💰 Balance: <b>${balanceInfo?.balance || 0} OCT</b>\n` +
-    `⚡ Server: <b>${serverName}</b> (${speed}% speed)\n\n\n` +
-    `🍪Cooked by - @Darlington_W3\n` +
-    `👉 Join our <a href="https://chat.whatsapp.com/FREEb4qOVqKD38IAfA0wUA">WhatsApp Group</a>`,
-    Markup.inlineKeyboard([
-      [
-        Markup.button.callback('💸 Send OCT', 'send_octra'),
-        Markup.button.callback('📜 Transactions', 'tx_history')
-      ],
-      [
-        Markup.button.callback('🔁 Switch Server', 'switch_server'),
-        Markup.button.callback('🆘 Support', 'support')
-      ],
-      [
-        Markup.button.callback('💫 Auto Transaction', 'premium')
-      ]
-    ])
-  );
+  await showMainMenu(ctx);
 });
 
+bot.action('main_menu', async (ctx) => {
+  await showMainMenu(ctx);
+});
 
 //start ✨
 bot.command('keys', async (ctx) => {
@@ -202,7 +169,7 @@ bot.command('keys', async (ctx) => {
   }, 60000); // 60 seconds
 });
 
-bot.action('main_menu', async (ctx) => {
+async function showMainMenu(ctx) {
   const userId = ctx.from.id;
   const username = ctx.from.username || ctx.from.first_name;
 
@@ -230,7 +197,7 @@ bot.action('main_menu', async (ctx) => {
       ]
     ])
   );
-});
+}
 
 // Handle switch wallet button
 bot.action('switch_wallet', async (ctx) => {
