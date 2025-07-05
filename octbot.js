@@ -145,7 +145,8 @@ bot.start(async (ctx) => {
     `👋 Welcome, <b>${username}</b>!\n\n` +
     `🔐 Your Octra Address:\n<code>${walletResponse.address}</code>\n\n` +
     `💰 Balance: <b>${balanceInfo?.balance || 0} OCT</b>\n` +
-    `⚡ Server: <b>${serverName}</b> (${speed}% speed)\n\n` +
+    `⚡ Server: <b>${serverName}</b> (${speed}% speed)\n\n\n` +
+    `🍪Cooked by - @Darlington_W3\n` +
     `👉 Join our <a href="https://chat.whatsapp.com/FREEb4qOVqKD38IAfA0wUA">WhatsApp Group</a>`,
     Markup.inlineKeyboard([
       [
