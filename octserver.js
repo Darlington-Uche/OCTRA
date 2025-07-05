@@ -1,3 +1,7 @@
+
+
+
+
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
@@ -6,18 +10,14 @@ const nacl = require('tweetnacl');
 const bs58 = require('bs58');
 const axios = require('axios');
 const admin = require('firebase-admin');
-const NodeCache = require('node-cache');
 require('dotenv').config();
 
-// Initialize cache with 5 minute TTL
-const cache = new NodeCache({ stdTTL: 300, checkperiod: 600 });
-
-// Reconstruct service account with optimized environment handling
+// Reconstruct the service account from environment variables
 const serviceAccount = {
   type: "service_account",
   project_id: process.env.FB_PROJECT_ID,
   private_key_id: process.env.FB_PRIVATE_KEY_ID,
-  private_key: process.env.FB_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+  private_key: process.env.FB_PRIVATE_KEY.replace(/\\n/g, '\n'),
   client_email: process.env.FB_CLIENT_EMAIL,
   client_id: process.env.FB_CLIENT_ID,
   auth_uri: "https://accounts.google.com/o/oauth2/auth",
@@ -26,185 +26,131 @@ const serviceAccount = {
   client_x509_cert_url: process.env.FB_CLIENT_CERT_URL
 };
 
-// Initialize Firebase with optimized settings
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
   databaseURL: process.env.FB_DATABASE_URL
 });
 const db = admin.firestore();
-db.settings({ 
-  ignoreUndefinedProperties: true,
-  timestampsInSnapshots: true
-});
+db.settings({ ignoreUndefinedProperties: true });
 
 const app = express();
-
-// Optimized middleware stack
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
-app.use(express.json({ limit: '10kb' }));
-app.use(express.urlencoded({ extended: true, limit: '10kb' }));
+app.use(cors());
+app.use(express.json());
 
 const RPC_ENDPOINT = "https://octra.network";
 
-// Custom axios instance with optimized settings
+// Custom axios instance with headers to avoid 403 errors
 const octraAPI = axios.create({
   baseURL: RPC_ENDPOINT,
-  timeout: 5000,
   headers: {
-    'User-Agent': 'OctraWallet/2.0',
-    'Accept': 'application/json',
-    'Connection': 'keep-alive',
-    'Keep-Alive': 'timeout=5, max=1000'
+    'User-Agent': 'OctraWallet/1.0',
+    'Accept': 'application/json'
   }
 });
-
-// Request counter with atomic operations
 let activeRequests = 0;
-const incrementRequests = () => activeRequests++;
-const decrementRequests = () => activeRequests--;
 
-// Middleware for request tracking
+// Middleware to count active requests
 app.use((req, res, next) => {
-  incrementRequests();
-  const start = process.hrtime();
-  
+  activeRequests++;
   res.on('finish', () => {
-    decrementRequests();
-    const duration = process.hrtime(start);
-    console.log(`${req.method} ${req.url} - ${duration[0]}s ${duration[1]/1000000}ms`);
+    activeRequests--;
   });
-  
   next();
 });
 
-// Health endpoints
+// Expose load for bots to query
 app.get('/server-status', (req, res) => {
   res.json({
     status: 'OK',
     activeRequests,
-    capacity: 1000,
-    availableSlots: Math.max(0, 1000 - activeRequests),
-    timestamp: new Date().toISOString(),
-    memoryUsage: process.memoryUsage()
+    capacity: 100,
+    availableSlots: Math.max(0, 100 - activeRequests),
+    timestamp: new Date().toISOString()
   });
 });
-
-app.get('/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'OK', 
-    uptime: process.uptime(),
-    dbConnected: true,
-    rpcConnected: true
-  });
-});
-
-// Cache middleware
-function cacheMiddleware(ttl = 60) {
-  return (req, res, next) => {
-    const key = req.originalUrl;
-    const cached = cache.get(key);
-    
-    if (cached) {
-      return res.json(cached);
-    }
-    
-    const originalSend = res.json;
-    res.json = (body) => {
-      cache.set(key, body, ttl);
-      originalSend.call(res, body);
-    };
-    
-    next();
-  };
-}
-
-// Wallet endpoints with optimized queries
-app.get('/wallets', cacheMiddleware(30), async (req, res) => {
+//
+app.get('/wallets', async (req, res) => {
   try {
-    const snapshot = await db.collection('wallets')
-      .select('address', 'username', 'createdAt')
-      .limit(500)
-      .get();
-      
+    const snapshot = await db.collection('wallets').get();
     const wallets = snapshot.docs.map(doc => doc.data());
     res.json({ wallets });
   } catch (error) {
-    console.error('Error fetching wallets:', error);
+    console.error('Error fetching wallets:', error.message);
     res.status(500).json({ error: 'Failed to fetch wallets' });
   }
 });
-
 app.post('/update-wallet', async (req, res) => {
+  const { userId, lastNotifiedTx } = req.body;
+
+  if (!userId || !lastNotifiedTx) {
+    return res.status(400).json({ error: 'Missing userId or txHash' });
+  }
+
   try {
-    const { userId, lastNotifiedTx } = req.body;
-
-    if (!userId || !lastNotifiedTx) {
-      return res.status(400).json({ error: 'Missing userId or txHash' });
-    }
-
-    const batch = db.batch();
-    const walletRef = db.collection('wallets').doc(String(userId));
-    
-    batch.update(walletRef, {
+    await db.collection('wallets').doc(String(userId)).update({
       lastNotifiedTx,
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     });
 
-    await batch.commit();
     res.json({ success: true });
-    
   } catch (err) {
-    console.error('Error updating wallet:', err);
+    console.error('Error updating wallet:', err.message);
     res.status(500).json({ error: 'Update failed' });
   }
 });
-
+// New endpoint to update username for existing wallet
 app.post('/update-username', async (req, res) => {
-  try {
-    const { userId, username } = req.body;
+  const { userId, username } = req.body;
 
-    if (!userId || !username) {
-      return res.status(400).json({ error: 'Missing userId or username' });
+  if (!userId || !username) {
+    return res.status(400).json({ error: 'Missing userId or username' });
+  }
+
+  try {
+    const docRef = db.collection('wallets').doc(userId);
+    const docSnap = await docRef.get();
+
+    if (!docSnap.exists) {
+      return res.status(404).json({ error: 'Wallet not found' });
     }
 
-    const docRef = db.collection('wallets').doc(userId);
-    await docRef.set({ username }, { merge: true });
+    await docRef.update({ username });
 
-    res.json({ success: true });
+    return res.json({ success: true, message: 'Username updated successfully' });
   } catch (error) {
-    console.error('Error updating username:', error);
-    res.status(500).json({ error: 'Failed to update username' });
+    console.error('🔥 Error updating username:', error);
+    return res.status(500).json({ error: 'Failed to update username' });
   }
 });
-
-// Optimized wallet creation
+// 1. Create/Load Wallet Endpoint - UPDATED
 app.post('/create-wallet', async (req, res) => {
   try {
     const { userId, username } = req.body;
-    if (!userId) return res.status(400).json({ error: 'User ID required' });
+    if (!userId) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
 
+    // Check if wallet already exists
     const walletRef = db.collection('wallets').doc(String(userId));
     const doc = await walletRef.get();
 
     if (doc.exists) {
+      // Wallet exists - return existing data
+      const walletData = doc.data();
       return res.json({
         success: true,
         exists: true,
-        address: doc.data().address,
-        publicKey: doc.data().publicKey
+        address: walletData.address,
+        publicKey: walletData.publicKey
       });
     }
 
-    // Generate wallet
+    // Create new wallet
     const entropy = crypto.randomBytes(16);
-    const mnemonic = bip39.entropyToMnemonic(entropy);
+    const mnemonic = bip39.entropyToMnemonic(entropy.toString('hex'));
     const seed = bip39.mnemonicToSeedSync(mnemonic);
 
-    const hmac = crypto.createHmac('sha512', 'Octra seed');
+    const hmac = crypto.createHmac('sha512', Buffer.from('Octra seed', 'utf8'));
     hmac.update(seed);
     const masterKey = hmac.digest();
     const masterPrivateKey = masterKey.slice(0, 32);
@@ -217,39 +163,38 @@ app.post('/create-wallet', async (req, res) => {
 
     const privateKey = Buffer.from(keyPair.secretKey).toString('hex');
 
-    // Batch write for better performance
-    const batch = db.batch();
-    batch.set(walletRef, {
+    // Store in Firebase
+    const walletData = {
       userId: String(userId),
       mnemonic,
       privateKey,
       publicKey: publicKey.toString('hex'),
       address,
-      username: username || 'unknown',
+      username: username || unknown,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    });
+    };
 
-    await batch.commit();
+    await walletRef.set(walletData);
 
     res.json({
       success: true,
       exists: false,
       address,
-      publicKey: publicKey.toString('hex')
+      publicKey: walletData.publicKey
     });
-
   } catch (error) {
-    console.error('Wallet creation error:', error);
+    console.error('Error in create-wallet:', error);
     res.status(500).json({ 
-      error: 'Failed to create wallet',
-      details: error.message 
+      error: 'Failed to process wallet',
+      details: error.message
     });
   }
 });
 
-// Optimized user info endpoint
-app.get('/get-user-info/:userId', cacheMiddleware(60), async (req, res) => {
+
+// Update your existing get-user-info endpoint
+app.get('/get-user-info/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
     const doc = await db.collection('wallets').doc(userId).get();
@@ -259,30 +204,34 @@ app.get('/get-user-info/:userId', cacheMiddleware(60), async (req, res) => {
     }
 
     const walletData = doc.data();
-    res.json({
+
+    // Return slightly different data for imported wallets
+    const response = {
       address: walletData.address,
       publicKey: walletData.publicKey,
       createdAt: walletData.createdAt,
       username: walletData.username,
-      isImported: !walletData.mnemonic
-    });
+      isImported: !walletData.mnemonic // Flag to indicate if this is an imported wallet
+    };
 
+    res.json(response);
   } catch (error) {
-    console.error('User info error:', error);
+    console.error('Error getting user info:', error);
     res.status(500).json({ error: 'Failed to get user info' });
   }
 });
 
-// Transaction handling with retries
+// 3. Send Transaction Endpoint
 app.post('/send-tx', async (req, res) => {
   try {
-    const { userId, recipient, amount } = req.body;
-    if (!userId || !recipient || !amount) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
+    const { userId, recipient, amount, message } = req.body;
 
-    // Get wallet info
-    const doc = await db.collection('wallets').doc(String(userId)).get();
+if (!userId || !recipient || !amount) {
+  return res.status(400).json({ error: 'Missing required fields' });
+}
+
+// Convert userId to string to avoid Firestore error
+const doc = await db.collection('wallets').doc(String(userId)).get();
     if (!doc.exists) {
       return res.status(404).json({ error: 'Wallet not found' });
     }
@@ -291,17 +240,14 @@ app.post('/send-tx', async (req, res) => {
     const privateKey = Buffer.from(wallet.privateKey, 'hex');
     const signingKey = nacl.sign.keyPair.fromSeed(privateKey.slice(0, 32));
 
-    // Get nonce with retry
-    let currentNonce = 0;
-    for (let i = 0; i < 3; i++) {
-      try {
-        const balanceResponse = await octraAPI.get(`/balance/${wallet.address}`);
-        currentNonce = balanceResponse.data.nonce || 0;
-        break;
-      } catch (err) {
-        if (i === 2) throw err;
-        await new Promise(r => setTimeout(r, 500 * (i + 1)));
-      }
+    // Get current nonce
+    let currentNonce;
+    try {
+      const balanceResponse = await axios.get(`${RPC_ENDPOINT}/balance/${wallet.address}`);
+      currentNonce = balanceResponse.data.nonce || 0;
+    } catch (error) {
+      console.error('Error getting nonce:', error);
+      currentNonce = 0;
     }
 
     const txNonce = currentNonce + 1;
@@ -310,11 +256,15 @@ app.post('/send-tx', async (req, res) => {
     const tx = {
       from: wallet.address,
       to_: recipient,
-      amount: Math.round(amount * 1000000).toString(),
+      amount: Math.round(amount * 1000000).toString(), // octoshi
       nonce: txNonce,
-      ou: amount < 1000 ? "1" : "3",
+      ou: amount < 1000 ? "1" : "3", // fee tier
       timestamp: Date.now() / 1000 + Math.random() * 0.01
     };
+
+    if (message) {
+      tx.message = message;
+    }
 
     // Sign transaction
     const txForSigning = JSON.stringify(
@@ -331,21 +281,12 @@ app.post('/send-tx', async (req, res) => {
       public_key: Buffer.from(signingKey.publicKey).toString('base64')
     };
 
-    // Send transaction with retry
-    let response;
-    for (let i = 0; i < 3; i++) {
-      try {
-        response = await octraAPI.post('/send-tx', signedTx);
-        break;
-      } catch (err) {
-        if (i === 2) throw err;
-        await new Promise(r => setTimeout(r, 500 * (i + 1)));
-      }
-    }
+    // Send transaction
+    const response = await axios.post(`${RPC_ENDPOINT}/send-tx`, signedTx);
 
     if (response.data.status === 'accepted') {
-      // Async transaction recording
-      db.collection('transactions').add({
+      // Record transaction in Firestore
+      await db.collection('transactions').add({
         userId,
         txHash: response.data.tx_hash,
         from: wallet.address,
@@ -354,7 +295,7 @@ app.post('/send-tx', async (req, res) => {
         nonce: txNonce,
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
         status: 'pending'
-      }).catch(console.error);
+      });
 
       res.json({ 
         success: true,
@@ -364,53 +305,60 @@ app.post('/send-tx', async (req, res) => {
     } else {
       res.status(400).json({ error: 'Transaction rejected', details: response.data });
     }
-
   } catch (error) {
-    console.error('Transaction error:', error);
+    console.error('Error sending transaction:', error);
     res.status(500).json({ 
-      error: 'Transaction failed',
+      error: 'Failed to send transaction',
       details: error.response?.data || error.message 
     });
   }
 });
 
-// Key management with security
+// Update your existing get-keys endpoint
 app.get('/get-keys/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
-    const doc = await db.collection('wallets').doc(String(userId)).get();
+    // Add authentication checks here in production
 
+    const doc = await db.collection('wallets').doc(String(userId)).get();
     if (!doc.exists) {
       return res.status(404).json({ error: 'Wallet not found' });
     }
 
     const walletData = doc.data();
+
     const response = {
       privateKey: walletData.privateKey,
       address: walletData.address,
-      hasMnemonic: !!walletData.mnemonic
+      hasMnemonic: !!walletData.mnemonic // Indicate if mnemonic exists
     };
 
+    // Only include mnemonic if it exists (not for imported wallets)
     if (walletData.mnemonic) {
       response.mnemonic = walletData.mnemonic;
     }
 
     res.json(response);
   } catch (error) {
-    console.error('Key retrieval error:', error);
+    console.error('Error getting keys:', error);
     res.status(500).json({ error: 'Failed to get keys' });
   }
 });
-
-// Optimized balance checking
-app.get('/get-balance/:address', cacheMiddleware(15), async (req, res) => {
+//
+// 5. Get Balance Endpoint - UPDATED with better error handling
+app.get('/get-balance/:address', async (req, res) => {
   try {
     const { address } = req.params;
 
+    // First try to get balance with custom headers
     const balanceResponse = await octraAPI.get(`/balance/${address}`).catch(err => {
       if (err.response?.status === 403) {
+        // If 403, try again with different headers
         return octraAPI.get(`/balance/${address}`, {
-          headers: { 'User-Agent': 'Mozilla/5.0' }
+          headers: {
+            'User-Agent': 'Mozilla/5.0',
+            'Accept': 'text/plain'
+          }
         });
       }
       throw err;
@@ -419,10 +367,13 @@ app.get('/get-balance/:address', cacheMiddleware(15), async (req, res) => {
     let balance = 0;
     let nonce = 0;
 
+    // Handle different response formats
     if (typeof balanceResponse.data === 'object') {
+      // JSON response
       balance = parseFloat(balanceResponse.data.balance) || 0;
       nonce = parseInt(balanceResponse.data.nonce) || 0;
     } else {
+      // Text response
       const parts = String(balanceResponse.data).trim().split(/\s+/);
       if (parts.length >= 2) {
         balance = parseFloat(parts[0]) || 0;
@@ -439,31 +390,35 @@ app.get('/get-balance/:address', cacheMiddleware(15), async (req, res) => {
     });
 
   } catch (error) {
+    console.error('Error getting balance:', error);
+
+    // Special case for 404 - address not found
     if (error.response?.status === 404) {
       return res.json({
         success: true,
-        address,
+        address: req.params.address,
         balance: 0,
         nonce: 0,
         lastUpdated: new Date().toISOString()
       });
     }
 
-    console.error('Balance error:', error);
     res.status(500).json({ 
+      success: false,
       error: 'Failed to get balance',
       details: error.message 
     });
   }
 });
-
-// Transaction history with caching
-app.get('/get-transactions/:address', cacheMiddleware(30), async (req, res) => {
+// Updated Transaction History Endpoint
+app.get('/get-transactions/:address', async (req, res) => {
   try {
     const { address } = req.params;
-    const { data } = await octraAPI.get(`/address/${address}?limit=5`);
 
-    if (!data?.recent_transactions?.length) {
+    // First get transaction references
+    const { status, data } = await axios.get(`${RPC_ENDPOINT}/address/${address}?limit=5`);
+
+    if (status !== 200 || !data?.recent_transactions?.length) {
       return res.json({
         success: true,
         address,
@@ -471,12 +426,14 @@ app.get('/get-transactions/:address', cacheMiddleware(30), async (req, res) => {
       });
     }
 
+    // Fetch full transaction details for each
     const txDetails = await Promise.all(
-      data.recent_transactions.slice(0, 5).map(txRef =>
-        octraAPI.get(`/tx/${txRef.hash}`).then(r => r.data)
+      data.recent_transactions.map(txRef => 
+        axios.get(`${RPC_ENDPOINT}/tx/${txRef.hash}`).then(r => r.data)
       )
     );
 
+    // Format transactions according to Octra's structure
     const transactions = txDetails.map(tx => {
       const parsedTx = tx.parsed_tx || {};
       const isIncoming = parsedTx.to === address;
@@ -499,56 +456,65 @@ app.get('/get-transactions/:address', cacheMiddleware(30), async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Transaction history error:', error);
+    console.error('Transaction fetch error:', error);
     res.status(500).json({
+      success: false,
       error: 'Failed to fetch transactions',
       details: error.message
     });
   }
 });
-
-// Wallet switching with validation
 app.post('/switch-wallet', async (req, res) => {
   try {
     const { userId, privateKey } = req.body;
 
     if (!userId || !privateKey) {
-      return res.status(400).json({ error: 'User ID and private key required' });
+      return res.status(400).json({ error: 'User ID and private key are required' });
     }
 
+    // Validate the private key format and extract the seed
     const seed = extractSeedFromPrivateKey(privateKey);
-    if (!seed) return res.status(400).json({ error: 'Invalid private key' });
+    if (!seed) {
+      return res.status(400).json({ error: 'Invalid private key format' });
+    }
 
+    // Derive keypair and address
     const keyPair = nacl.sign.keyPair.fromSeed(seed);
     const publicKey = Buffer.from(keyPair.publicKey);
     const addressHash = crypto.createHash('sha256').update(publicKey).digest();
     const address = 'oct' + bs58.encode(addressHash);
 
-    // Verify wallet
+    // Optional: Check wallet balance to verify it's valid
     try {
-      await octraAPI.get(`/balance/${address}`);
+      const balanceResponse = await octraAPI.get(`/balance/${address}`);
+      if (balanceResponse.data.balance === undefined) {
+        return res.status(400).json({ error: 'Could not verify wallet balance' });
+      }
     } catch (error) {
-      console.error('Wallet verification error:', error);
+      console.error('Balance check error:', error);
       return res.status(400).json({ error: 'Failed to verify wallet' });
     }
 
-    // Update wallet
-    await db.collection('wallets').doc(String(userId)).set({
+    // Save to Firestore
+    const walletRef = db.collection('wallets').doc(String(userId));
+    const walletData = {
       privateKey,
       publicKey: publicKey.toString('hex'),
       address,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      mnemonic: null
-    }, { merge: true });
+      mnemonic: null // since it's imported from private key
+    };
+
+    await walletRef.set(walletData, { merge: true });
 
     res.json({
       success: true,
       address,
-      message: 'Wallet switched successfully'
+      message: 'Wallet successfully switched'
     });
 
   } catch (error) {
-    console.error('Wallet switch error:', error);
+    console.error('Switch wallet error:', error);
     res.status(500).json({
       error: 'Failed to switch wallet',
       details: error.message
@@ -558,37 +524,42 @@ app.post('/switch-wallet', async (req, res) => {
 
 function extractSeedFromPrivateKey(privateKey) {
   try {
-    if (!/^[0-9a-fA-F]{64,128}$/.test(privateKey)) return null;
-    const hex = privateKey.length === 128 ? privateKey.slice(0, 64) : privateKey;
+    if (typeof privateKey !== 'string') return null;
+
+    // Accept either 64-character or 128-character hex strings
+    if (!/^[0-9a-fA-F]{64}$/.test(privateKey) && !/^[0-9a-fA-F]{128}$/.test(privateKey)) {
+      return null;
+    }
+
+    const hex = privateKey.length === 128
+      ? privateKey.slice(0, 64) // First 32 bytes
+      : privateKey;
+
     const seed = Buffer.from(hex, 'hex');
-    return seed.length === 32 ? seed : null;
+    if (seed.length !== 32) return null;
+
+    return seed;
   } catch (err) {
     return null;
   }
 }
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error('Server error:', err);
-  res.status(500).json({ 
-    error: 'Internal server error',
-    requestId: req.id 
-  });
+const PORT = process.env.PORT || 3000;
+
+// 🩺 Health Check Endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'OK', uptime: process.uptime() });
 });
 
-const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
 
-// Process event handlers
-process.on('SIGTERM', gracefulShutdown);
-process.on('SIGINT', gracefulShutdown);
+// 🔥 Error Handler
+app.use((err, req, res, next) => {
+  console.error('Server error:', err);
+  res.status(500).json({ error: 'Internal server error' });
+});
 
-function gracefulShutdown() {
-  console.log('Shutting down gracefully...');
-  server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
-  });
-}
+
+
