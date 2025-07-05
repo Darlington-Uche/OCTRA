@@ -12,9 +12,6 @@ bot.telegram.setWebhook(webhookurl);
 // This tells Express how to handle webhook requests from Telegram
 app.use(bot.webhookCallback('/telegram-webhook'));
 
-const CHECK_INTERVAL = 60 * 1000; // Every 60 seconds
-const notifiedTxs = {}; // Tracks last seen tx per user
-
 // Optional: base route to confirm server is live
 app.get('/', (req, res) => {
   res.send('Hello! i am alive and Active 🤔');
@@ -108,15 +105,17 @@ async function callAPI(endpoint, method = 'get', data = {}) {
     return { error: 'Octra Error' }; // <== Friendly fallback
   }
 }
+setInterval(checkForIncomingTxs, 60000); // every 1munite
 async function checkForIncomingTxs() {
   try {
-    const walletList = await axios.get(`/wallets`);
-    const wallets = walletList.data?.wallets || [];
+    // Fetch all wallets from the backend
+    const walletList = await callAPI('/wallets');
+    const wallets = walletList?.wallets || [];
 
     for (const wallet of wallets) {
-      const userId = wallet.userId;
-      const address = wallet.address;
+      const { userId, address, lastNotifiedTx } = wallet;
 
+      // Get latest transactions for this wallet
       const txData = await callAPI(`/get-transactions/${address}`);
       const txs = txData?.transactions || [];
 
@@ -124,24 +123,22 @@ async function checkForIncomingTxs() {
 
       const latestTx = txs[0];
 
-      // Skip if not incoming
+      // Skip if not incoming or already notified
       if (latestTx.type !== 'in') continue;
+      if (latestTx.hash === lastNotifiedTx) continue;
 
-      // Compare with wallet.lastNotifiedTx from DB
-      if (wallet.lastNotifiedTx === latestTx.hash) continue;
-
-      // Send notification
       const amount = latestTx.amount.toFixed(4);
       const from = latestTx.counterparty || 'Unknown';
 
+      // Send Telegram notification
       await bot.telegram.sendMessage(
         userId,
         `✅ You just received <b>${amount} OCT</b>\nFrom: <code>${from}</code>`,
         { parse_mode: 'HTML' }
       );
 
-      // Save latest hash to Firestore
-      await axios.post(`/update-wallet`, {
+      // Update backend with last notified tx hash
+      await callAPI('/update-wallet', 'post', {
         userId,
         lastNotifiedTx: latestTx.hash
       });
@@ -572,7 +569,6 @@ bot.action('tx_history', async (ctx) => {
     await ctx.reply('❌ Failed to load transactions. Please try again later.');
   }
 });
-setInterval(checkForIncomingTxs, CHECK_INTERVAL);
 
 // Other menu buttons (placeholders)
 bot.action(['x', 'support', 'premium'], async (ctx) => {
