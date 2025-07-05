@@ -43,7 +43,27 @@ const octraAPI = axios.create({
     'Accept': 'application/json'
   }
 });
+let activeRequests = 0;
 
+// Middleware to count active requests
+app.use((req, res, next) => {
+  activeRequests++;
+  res.on('finish', () => {
+    activeRequests--;
+  });
+  next();
+});
+
+// Expose load for bots to query
+app.get('/server-status', (req, res) => {
+  res.json({
+    status: 'OK',
+    activeRequests,
+    capacity: 100,
+    availableSlots: Math.max(0, 100 - activeRequests),
+    timestamp: new Date().toISOString()
+  });
+});
 // 1. Create/Load Wallet Endpoint - UPDATED
 app.post('/create-wallet', async (req, res) => {
   try {
