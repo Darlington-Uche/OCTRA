@@ -12,6 +12,9 @@ bot.telegram.setWebhook(webhookurl);
 // This tells Express how to handle webhook requests from Telegram
 app.use(bot.webhookCallback('/telegram-webhook'));
 
+const CHECK_INTERVAL = 60 * 1000; // Every 60 seconds
+const notifiedTxs = {}; // Tracks last seen tx per user
+
 // Optional: base route to confirm server is live
 app.get('/', (req, res) => {
   res.send('Hello! i am alive and Active 🤔');
@@ -569,6 +572,7 @@ bot.action('tx_history', async (ctx) => {
     await ctx.reply('❌ Failed to load transactions. Please try again later.');
   }
 });
+setInterval(checkForIncomingTxs, CHECK_INTERVAL);
 
 // Other menu buttons (placeholders)
 bot.action(['x', 'support', 'premium'], async (ctx) => {
