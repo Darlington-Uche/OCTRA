@@ -19,7 +19,13 @@ app.use(bot.webhookCallback('/telegram-webhook'));
 app.get('/', (req, res) => {
   res.send('Hello! i am alive and Active 🤔');
 });
-
+const sessions = {};
+const SERVERS = [
+  process.env.SERVER,
+  process.env.SERVER_2,
+  process.env.SERVER_3,
+  process.env.SERVER_4
+];
 // Add this near your other constants
 const SERVER_NAMES = {
   [process.env.SERVER]: "Server 1",
