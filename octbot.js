@@ -132,7 +132,6 @@ async function checkForIncomingTxs() {
   try {
     console.log('⏳ Scanning...');
 
-    // Use Server 4 API for all requests
     const walletList = await callServer4API('/wallets');
     const wallets = walletList?.wallets || [];
 
@@ -150,19 +149,37 @@ async function checkForIncomingTxs() {
       if (latestTx.hash === lastNotifiedTx) continue;
 
       const amount = latestTx.amount.toFixed(4);
-      const from = latestTx.counterparty || 'Unknown';
+      const senderAddress = latestTx.counterparty || 'Unknown';
 
+      // 👇 Try to find if the sender address belongs to a bot user
+      const senderDoc = await db.collection('wallets')
+        .where('address', '==', senderAddress)
+        .limit(1)
+        .get();
+
+      let senderLabel = senderAddress;
+
+      if (!senderDoc.empty) {
+        const senderData = senderDoc.docs[0].data();
+        if (senderData.username) {
+          senderLabel = `@${senderData.username}`;
+        }
+      }
+
+      // ✅ Send Telegram notification
       await bot.telegram.sendMessage(
         userId,
-        `✅ You just received <b>${amount} OCT</b>\nFrom: <code>${from}</code>`,
+        `✅ You just received <b>${amount} OCT</b>\nFrom: <code>${senderLabel}</code>`,
         { parse_mode: 'HTML' }
       );
 
+      // ✅ Update wallet with last notified tx hash
       await callServer4API('/update-wallet', 'post', {
         userId,
         lastNotifiedTx: latestTx.hash
       });
     }
+
   } catch (err) {
     console.error('❌ Error:', err.message);
   } finally {
