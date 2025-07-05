@@ -138,9 +138,6 @@ bot.start(async (ctx) => {
   const userId = String(ctx.from.id);
   const username = ctx.from.username || ctx.from.first_name;
 
-  // Always update username in the background
-  callAPI('/update-username', 'post', { userId, username }).catch(console.error);
-
   // Check or create wallet
   const walletResponse = await callAPI('/create-wallet', 'post', {
     userId,
@@ -386,6 +383,7 @@ else if (session.step === 'await_private_key') {
 bot.action('confirm_tx', async (ctx) => {
   const userId = ctx.from.id;
   const session = sessions[userId];
+  const senderUsername = ctx.from.username || ctx.from.first_name;
 
   if (!session || session.step !== 'confirm') return;
 
@@ -402,22 +400,16 @@ bot.action('confirm_tx', async (ctx) => {
   });
 
   if (txResult?.success) {
-    // ✅ Get sender info to extract username
-    const senderInfo = await callAPI(`/get-user-info/${userId}`);
-    const senderUsername = senderInfo?.username || 'Unknown';
-
-    // ✅ Get recipient info using recipient address
+    // Get recipient info using recipient address
     const allWallets = await callAPI('/wallets');
     const recipientWallet = allWallets?.wallets?.find(w => w.address === session.recipient);
 
     if (recipientWallet?.userId) {
-      const receiverUserId = recipientWallet.userId;
-
       await bot.telegram.sendMessage(
-        receiverUserId,
-        `✅ You just received <b>${session.amount.toFixed(4)} OCT</b>\nFrom: @${senderUsername}`,
+        recipientWallet.userId,
+        `✅ You just received <b>${session.amount.toFixed(4)} OCT</b>\nFrom: ${senderUsername ? '@' + senderUsername : 'a user'}`,
         { parse_mode: 'HTML' }
-      );
+      ).catch(console.error); // Silently handle message failures
     }
 
     await ctx.editMessageText(
@@ -445,7 +437,6 @@ bot.action('confirm_tx', async (ctx) => {
 
   delete sessions[userId];
 });
-
 // C`ancel transaction
 bot.action('cancel_tx', async (ctx) => {
   const userId = ctx.from.id;
