@@ -106,6 +106,23 @@ async function callAPI(endpoint, method = 'get', data = {}) {
     return { error: 'Octra Error' }; // <== Friendly fallback
   }
 }
+
+const SERVER_4_BASE = process.env.SERVER_4; 
+
+async function callServer4API(path, method = 'get', data = null) {
+  try {
+    const res = await axios({
+      url: `${SERVER_4_BASE}${path}`,
+      method,
+      data
+    });
+    return res.data;
+  } catch (err) {
+    console.error('❌ Server 4 API error:', err.response?.data || err.message);
+    throw err;
+  }
+}
+
 let isScanning = false;
 
 async function checkForIncomingTxs() {
@@ -114,37 +131,34 @@ async function checkForIncomingTxs() {
 
   try {
     console.log('⏳ Scanning...');
-    // Fetch all wallets from the backend
-    const walletList = await callAPI('/wallets');
+
+    // Use Server 4 API for all requests
+    const walletList = await callServer4API('/wallets');
     const wallets = walletList?.wallets || [];
 
     for (const wallet of wallets) {
       const { userId, address, lastNotifiedTx } = wallet;
 
-      // Get latest transactions for this wallet
-      const txData = await callAPI(`/get-transactions/${address}`);
+      const txData = await callServer4API(`/get-transactions/${address}`);
       const txs = txData?.transactions || [];
 
       if (!txs.length) continue;
 
       const latestTx = txs[0];
 
-      // Skip if not incoming or already notified
       if (latestTx.type !== 'in') continue;
       if (latestTx.hash === lastNotifiedTx) continue;
 
       const amount = latestTx.amount.toFixed(4);
       const from = latestTx.counterparty || 'Unknown';
 
-      // Send Telegram notification
       await bot.telegram.sendMessage(
         userId,
         `✅ You just received <b>${amount} OCT</b>\nFrom: <code>${from}</code>`,
         { parse_mode: 'HTML' }
       );
 
-      // Update backend with last notified tx hash
-      await callAPI('/update-wallet', 'post', {
+      await callServer4API('/update-wallet', 'post', {
         userId,
         lastNotifiedTx: latestTx.hash
       });
@@ -155,6 +169,7 @@ async function checkForIncomingTxs() {
     isScanning = false;
   }
 }
+
 setInterval(checkForIncomingTxs, 10000);
 
 //start ✨
