@@ -16,12 +16,15 @@ app.use(bot.webhookCallback('/telegram-webhook'));
 app.get('/', (req, res) => {
   res.send('Hello! i am alive and Active 🤔');
 });
+const SERVERS = [
+  process.env.SERVER, 
+  process.env.SERVER_2  
+];
 
 // Start the server
 app.listen(3000, () => {
   console.log('Server 10100101010010');
 });
-const LOCAL_SERVER_URL = process.env.SERVER; // Your local server URL
 
 // Session storage for transaction flow
 const sessions = {};
@@ -51,12 +54,35 @@ function getSession(userId) {
 // Run cleanup every hour
 setInterval(cleanupSessions, 60 * 60 * 1000);
 
-// Update the callAPI function to better handle errors
+//Server test ❗
+async function getLeastBusyServer() {
+  try {
+    const results = await Promise.all(
+      SERVERS.map(async (url) => {
+        try {
+          const res = await axios.get(`${url}/server-status`);
+          return { url, load: res.data.activeRequests ?? Infinity };
+        } catch {
+          return { url, load: Infinity };
+        }
+      })
+    );
+
+    results.sort((a, b) => a.load - b.load);
+    return results[0].url;
+  } catch (err) {
+    console.error('Error checking server load:', err);
+    return SERVERS[0]; // fallback
+  }
+}
+
 async function callAPI(endpoint, method = 'get', data = {}) {
   try {
+    const baseURL = await getLeastBusyServer();
+
     const config = {
       method,
-      url: `${LOCAL_SERVER_URL}${endpoint}`,
+      url: `${baseURL}${endpoint}`,
       headers: {
         'Content-Type': 'application/json'
       }
@@ -76,7 +102,49 @@ async function callAPI(endpoint, method = 'get', data = {}) {
       error: error.response?.data || error.message,
       requestData: data
     });
-    return { error: error.response?.data?.error || 'API request failed' };
+    return { error: 'Octra Error' }; // <== Friendly fallback
+  }
+}
+async function checkForIncomingTxs() {
+  try {
+    const walletList = await axios.get(`${await getLeastBusyServer()}/wallets`);
+    const wallets = walletList.data?.wallets || [];
+
+    for (const wallet of wallets) {
+      const userId = wallet.userId;
+      const address = wallet.address;
+
+      const txData = await callAPI(`/get-transactions/${address}`);
+      const txs = txData?.transactions || [];
+
+      if (!txs.length) continue;
+
+      const latestTx = txs[0];
+
+      // Skip if not incoming
+      if (latestTx.type !== 'in') continue;
+
+      // Compare with wallet.lastNotifiedTx from DB
+      if (wallet.lastNotifiedTx === latestTx.hash) continue;
+
+      // Send notification
+      const amount = latestTx.amount.toFixed(4);
+      const from = latestTx.counterparty || 'Unknown';
+
+      await bot.telegram.sendMessage(
+        userId,
+        `✅ You just received <b>${amount} OCT</b>\nFrom: <code>${from}</code>`,
+        { parse_mode: 'HTML' }
+      );
+
+      // Save latest hash to Firestore
+      await axios.post(`${await getLeastBusyServer()}/update-wallet`, {
+        userId,
+        lastNotifiedTx: latestTx.hash
+      });
+    }
+  } catch (err) {
+    console.error('❌ Error in TX scan:', err.message);
   }
 }
 bot.command('keys', async (ctx) => {
