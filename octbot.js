@@ -217,8 +217,11 @@ bot.start(async (ctx) => {
   const username = ctx.from.username || ctx.from.first_name;
   
   // Check if wallet exists first
-  const walletResponse = await callAPI('/create-wallet', 'post', { userId });
-  
+  const walletResponse = await callAPI('/create-wallet', 'post', {
+  userId,
+  username: ctx.from.username || ctx.from.first_name
+});
+
   if (!walletResponse || walletResponse.error) {
     return ctx.reply('❌ Failed to access your wallet. Please try again.');
   }
