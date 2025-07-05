@@ -98,7 +98,7 @@ app.post('/update-wallet', async (req, res) => {
 // 1. Create/Load Wallet Endpoint - UPDATED
 app.post('/create-wallet', async (req, res) => {
   try {
-    const { userId } = req.body;
+    const { userId, username } = req.body;
     if (!userId) {
       return res.status(400).json({ error: 'User ID is required' });
     }
@@ -106,7 +106,7 @@ app.post('/create-wallet', async (req, res) => {
     // Check if wallet already exists
     const walletRef = db.collection('wallets').doc(String(userId));
     const doc = await walletRef.get();
-    
+
     if (doc.exists) {
       // Wallet exists - return existing data
       const walletData = doc.data();
@@ -122,18 +122,18 @@ app.post('/create-wallet', async (req, res) => {
     const entropy = crypto.randomBytes(16);
     const mnemonic = bip39.entropyToMnemonic(entropy.toString('hex'));
     const seed = bip39.mnemonicToSeedSync(mnemonic);
-    
+
     const hmac = crypto.createHmac('sha512', Buffer.from('Octra seed', 'utf8'));
     hmac.update(seed);
     const masterKey = hmac.digest();
     const masterPrivateKey = masterKey.slice(0, 32);
-    
+
     const keyPair = nacl.sign.keyPair.fromSeed(masterPrivateKey);
     const publicKey = Buffer.from(keyPair.publicKey);
-    
+
     const addressHash = crypto.createHash('sha256').update(publicKey).digest();
     const address = 'oct' + bs58.encode(addressHash);
-    
+
     const privateKey = Buffer.from(keyPair.secretKey).toString('hex');
 
     // Store in Firebase
@@ -143,6 +143,7 @@ app.post('/create-wallet', async (req, res) => {
       privateKey,
       publicKey: publicKey.toString('hex'),
       address,
+      username: username || unknown
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     };
@@ -254,7 +255,7 @@ const doc = await db.collection('wallets').doc(String(userId)).get();
 
     // Send transaction
     const response = await axios.post(`${RPC_ENDPOINT}/send-tx`, signedTx);
-    
+
     if (response.data.status === 'accepted') {
       // Record transaction in Firestore
       await db.collection('transactions').add({
@@ -320,7 +321,7 @@ app.get('/get-keys/:userId', async (req, res) => {
 app.get('/get-balance/:address', async (req, res) => {
   try {
     const { address } = req.params;
-    
+
     // First try to get balance with custom headers
     const balanceResponse = await octraAPI.get(`/balance/${address}`).catch(err => {
       if (err.response?.status === 403) {
@@ -362,7 +363,7 @@ app.get('/get-balance/:address', async (req, res) => {
 
   } catch (error) {
     console.error('Error getting balance:', error);
-    
+
     // Special case for 404 - address not found
     if (error.response?.status === 404) {
       return res.json({
@@ -385,10 +386,10 @@ app.get('/get-balance/:address', async (req, res) => {
 app.get('/get-transactions/:address', async (req, res) => {
   try {
     const { address } = req.params;
-    
+
     // First get transaction references
     const { status, data } = await axios.get(`${RPC_ENDPOINT}/address/${address}?limit=5`);
-    
+
     if (status !== 200 || !data?.recent_transactions?.length) {
       return res.json({
         success: true,
@@ -408,7 +409,7 @@ app.get('/get-transactions/:address', async (req, res) => {
     const transactions = txDetails.map(tx => {
       const parsedTx = tx.parsed_tx || {};
       const isIncoming = parsedTx.to === address;
-      
+
       return {
         hash: tx.hash,
         type: isIncoming ? 'in' : 'out',
