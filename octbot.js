@@ -371,39 +371,37 @@ else if (session.step === 'await_private_key') {
   await ctx.deleteMessage();
 }
   else if (session.step === 'await_amount') {
-    const amount = parseFloat(ctx.message.text);
+  const amount = parseFloat(ctx.message.text);
 
-    if (isNaN(amount) || amount <= 0) {
-      return ctx.reply('❌ Please enter a valid positive number');
-    }
-
-    // Get current balance
-    const balanceInfo = await callAPI(`/get-balance/${session.walletAddress}`);
-    const balance = balanceInfo?.balance || 0;
-
-    if (amount > balance) {
-      return ctx.reply(`❌ Insufficient balance (You have ${balance} OCT)`);
-    }
-
-    session.amount = amount;
-    session.step = 'confirm';
-
-    await ctx.replyWithHTML(
-      `🔍 <b>Confirm Transaction</b>\n\n` +
-      `To: <code>${session.recipient}</code>\n` +
-      `Amount: <b>${amount} OCT</b>\n\n` +
-      `Network fee: 0.001 OCT`,
-      Markup.inlineKeyboard([
-        [
-          Markup.button.callback('✅ Confirm', 'confirm_tx'),
-          Markup.button.callback('🚫 Cancel', 'cancel_tx')
-        ]
-      ])
-    );
-
-    await ctx.deleteMessage();
+  if (isNaN(amount) || amount <= 0) {
+    return ctx.reply('❌ Please enter a valid positive number');
   }
-});
+
+  // Use stored balance instead of fetching again
+  const balance = session.balance || 0;
+
+  if (amount > balance) {
+    return ctx.reply(`❌ Insufficient balance (You have ${balance} OCT)`);
+  }
+
+  session.amount = amount;
+  session.step = 'confirm';
+
+  await ctx.replyWithHTML(
+    `🔍 <b>Confirm Transaction</b>\n\n` +
+    `To: <code>${session.recipient}</code>\n` +
+    `Amount: <b>${amount} OCT</b>\n\n` +
+    `Network fee: 0.001 OCT`,
+    Markup.inlineKeyboard([
+      [
+        Markup.button.callback('✅ Confirm', 'confirm_tx'),
+        Markup.button.callback('🚫 Cancel', 'cancel_tx')
+      ]
+    ])
+  );
+
+  await ctx.deleteMessage();
+}
 
 // Confirm transaction
 bot.action('confirm_tx', async (ctx) => {
