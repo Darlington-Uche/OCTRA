@@ -64,6 +64,37 @@ app.get('/server-status', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
+//
+app.get('/wallets', async (req, res) => {
+  try {
+    const snapshot = await db.collection('wallets').get();
+    const wallets = snapshot.docs.map(doc => doc.data());
+    res.json({ wallets });
+  } catch (error) {
+    console.error('Error fetching wallets:', error.message);
+    res.status(500).json({ error: 'Failed to fetch wallets' });
+  }
+});
+app.post('/update-wallet', async (req, res) => {
+  const { userId, lastNotifiedTx } = req.body;
+
+  if (!userId || !lastNotifiedTx) {
+    return res.status(400).json({ error: 'Missing userId or txHash' });
+  }
+
+  try {
+    await db.collection('wallets').doc(String(userId)).update({
+      lastNotifiedTx,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error updating wallet:', err.message);
+    res.status(500).json({ error: 'Update failed' });
+  }
+});
+
 // 1. Create/Load Wallet Endpoint - UPDATED
 app.post('/create-wallet', async (req, res) => {
   try {
