@@ -1,5 +1,3 @@
- 
-
 
 const express = require('express');
 const axios = require('axios');
@@ -53,7 +51,7 @@ async function getServerWithSpeed(userId) {
       SERVERS.map(async (url) => {
         try {
           const start = Date.now();
-          await axios.get(`${url}/server-status`, { timeout: 2000 });
+          await axios.get(`${url}/server-status`, { timeout: 10000 });
           const speed = Math.min(100, Math.round(1000 / (Date.now() - start)));
           return { url, speed };
         } catch {
