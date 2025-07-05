@@ -152,44 +152,47 @@ bot.command('keys', async (ctx) => {
 bot.start(async (ctx) => {
   const userId = String(ctx.from.id);
   const username = ctx.from.username || ctx.from.first_name;
-  
-  // Check if wallet exists first
+
+  // Always update username in the background
+  callAPI('/update-username', 'post', { userId, username }).catch(console.error);
+
+  // Check or create wallet
   const walletResponse = await callAPI('/create-wallet', 'post', {
-  userId,
-  username: ctx.from.username || ctx.from.first_name
-});
+    userId,
+    username
+  });
 
   if (!walletResponse || walletResponse.error) {
     return ctx.reply('❌ Failed to access your wallet. Please try again.');
   }
 
-  // Get balance
+  // Fetch balance
   const balanceInfo = await callAPI(`/get-balance/${walletResponse.address}`);
-  
-  const welcomeMessage = walletResponse.exists ?
-    `👋 Welcome back, <b>${username}</b>!` :
-    `🎉 Welcome, <b>${username}</b>! Your new Octra wallet is ready!`;
-  
+
+  const welcomeMessage = walletResponse.exists
+    ? `👋 Welcome back, <b>${username}</b>!`
+    : `🎉 Welcome, <b>${username}</b>! Your new Octra wallet is ready!`;
+
   await ctx.replyWithHTML(
     `${welcomeMessage}\n\n` +
     `🔐 Your Octra Address:\n<code>${walletResponse.address}</code>\n\n` +
     `💰 Balance: <b>${balanceInfo?.balance || 0} OCT</b>\n\n` +
     `👉 Join our <a href="https://chat.whatsapp.com/FREEb4qOVqKD38IAfA0wUA">WhatsApp Group</a>\n\n` +
     `Made by @Darlington_W3\n\n\n` +
-    `Bot is currently slow due to high volume of users the bot will be upgraded soon and more features will be available on open soon ✅`,
-Markup.inlineKeyboard([
-  [
-    Markup.button.callback('💸 Send OCT', 'send_octra'),
-    Markup.button.callback('📜 Transactions', 'tx_history')
-  ],
-  [
-    Markup.button.callback('🔑 Switch Wallet', 'switch_wallet'),
-    Markup.button.callback('🆘 Support', 'support')
-  ],
-  [
-    Markup.button.callback('💫Auto Transaction', 'premium')
-  ]
-])
+    `---Server 10453$__ ✅`,
+    Markup.inlineKeyboard([
+      [
+        Markup.button.callback('💸 Send OCT', 'send_octra'),
+        Markup.button.callback('📜 Transactions', 'tx_history')
+      ],
+      [
+        Markup.button.callback('🔑 Switch Wallet', 'switch_wallet'),
+        Markup.button.callback('🆘 Support', 'support')
+      ],
+      [
+        Markup.button.callback('💫Auto Transaction', 'premium')
+      ]
+    ])
   );
 });
 
