@@ -177,6 +177,12 @@ async function showMainMenu(ctx) {
   const walletResponse = await callAPI('/create-wallet', 'post', { userId, username }, userId);
   const balanceInfo = await callAPI(`/get-balance/${walletResponse.address}`, 'get', {}, userId);
 
+  // Store wallet and balance in session
+  sessions[userId] = {
+    walletAddress: walletResponse.address,
+    balance: balanceInfo?.balance || 0
+  };
+
   await ctx.replyWithHTML(
     `👋 Welcome, <b>${username}</b>!\n\n` +
     `🔐 Your Octra Address:\n<code>${walletResponse.address}</code>\n\n` +
@@ -278,26 +284,26 @@ bot.action('cancel_switch', async (ctx) => {
   );
 });
 
-// Send OCT flow
 bot.action('send_octra', async (ctx) => {
   const userId = ctx.from.id;
 
-  // Get wallet info
-  const wallet = await callAPI(`/get-user-info/${userId}`);
-  if (!wallet) {
-    return ctx.reply('❌ Failed to load your wallet. Please try again.');
+  const session = sessions[userId] || {};
+  const walletAddress = session.walletAddress;
+
+  if (!walletAddress) {
+    return ctx.reply('❌ Wallet not initialized. Please use /start first.');
   }
 
-  // Initialize session
-  sessions[userId] = { 
-    step: 'await_address',
-    walletAddress: wallet.address 
+  // Reinitialize session but preserve wallet & balance
+  sessions[userId] = {
+    ...session,
+    step: 'await_address'
   };
 
   await ctx.editMessageText(
     `✉️ <b>Send Octra</b>\n\n` +
     `Enter the recipient address:\n\n` +
-    `My address: <code>${wallet.address}</code>\n\n` +
+    `My address: <code>${walletAddress}</code>\n\n` +
     `You can send Here <code>oct4M33BxGEUXSdUDLgt9tpZx64NYwd5Fkw6QMV3Pei7hGa</code>`,
     {
       parse_mode: 'HTML',
@@ -316,25 +322,23 @@ bot.on('text', async (ctx) => {
   if (!session) return;
 
   if (session.step === 'await_address') {
-    // Validate address format
-    if (!ctx.message.text.startsWith('oct')) {
-      return ctx.reply('❌ Invalid Octra address format. Must start with "oct"');
-    }
+  if (!ctx.message.text.startsWith('oct')) {
+    return ctx.reply('❌ Invalid Octra address format. Must start with "oct"');
+  }
 
-    session.recipient = ctx.message.text;
-    session.step = 'await_amount';
+  session.recipient = ctx.message.text;
+  session.step = 'await_amount';
 
-    // Get current balance
-    const balanceInfo = await callAPI(`/get-balance/${session.walletAddress}`);
-    const balance = balanceInfo?.balance || 0;
+  // Use stored balance
+  const balance = session.balance || 0;
 
-    await ctx.replyWithHTML(
-      `💵 Enter amount to send (Your balance: ${balance} OCT)`,
-      Markup.inlineKeyboard([
-        [Markup.button.callback('🚫 Cancel', 'cancel_tx')]
-      ])
-    );
-    await ctx.deleteMessage();
+  await ctx.replyWithHTML(
+    `💵 Enter amount to send (Your balance: ${balance} OCT)`,
+    Markup.inlineKeyboard([
+      [Markup.button.callback('🚫 Cancel', 'cancel_tx')]
+    ])
+  );
+  await ctx.deleteMessage();
 }
 
 else if (session.step === 'await_private_key') {
