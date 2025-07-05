@@ -543,7 +543,11 @@ bot.action('tx_history', async (ctx) => {
 bot.action(['x', 'support', 'premium'], async (ctx) => {
   await ctx.answerCbQuery('🚧 Feature coming soon!');
 });
-
+// Start server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
 // Error handling
 bot.catch((err) => {
   console.error('Bot error:', err);
