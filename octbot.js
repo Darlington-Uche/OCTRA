@@ -130,26 +130,25 @@ bot.command('keys', async (ctx) => {
   }
 });
 
+
 // Optimized start command
 bot.start(async (ctx) => {
-  const userId = String(ctx.from.id);
-  const username = ctx.from.username || ctx.from.first_name;
-  
-  // Always update username in the background
-  callAPI('/update-username', 'post', { userId, username }).catch(console.error);
+  try {
+    const userId = String(ctx.from.id);
+    const username = ctx.from.username || ctx.from.first_name;
 
-  // Check or create wallet
-  const walletResponse = await callAPI('/create-wallet', 'post', {
-    userId,
-    username
-  });
+    // Always update username in the background
+    callAPI('/update-username', 'post', { userId, username }).catch(console.error);
 
-  if (!walletResponse || walletResponse.error) {
-    return ctx.reply('❌ Failed to access your wallet. Please try again.');
-  }
+    // Check or create wallet
+    const walletResponse = await callAPI('/create-wallet', 'post', { userId, username });
 
-  // Fetch balance
-  const balanceInfo = await callAPI(`/get-balance/${walletResponse.address}`);
+    if (!walletResponse || walletResponse.error) {
+      return ctx.reply('❌ Failed to access your wallet. Please try again.');
+    }
+
+    // Fetch balance
+    const balanceInfo = await callAPI(`/get-balance/${walletResponse.address}`);
 
     const welcomeMessage = walletResponse.exists
       ? `👋 Welcome back, <b>${username}</b>!`
@@ -170,7 +169,7 @@ bot.start(async (ctx) => {
           Markup.button.callback('🆘 Support', 'support')
         ],
         [
-          Markup.button.callback('💫Auto Transaction', 'premium')
+          Markup.button.callback('💫 Auto Transaction', 'premium')
         ]
       ])
     );
