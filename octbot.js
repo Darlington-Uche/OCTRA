@@ -107,7 +107,7 @@ async function callAPI(endpoint, method = 'get', data = {}) {
 }
 async function checkForIncomingTxs() {
   try {
-    const walletList = await axios.get(`${await getLeastBusyServer()}/wallets`);
+    const walletList = await axios.get(`/wallets`);
     const wallets = walletList.data?.wallets || [];
 
     for (const wallet of wallets) {
@@ -138,7 +138,7 @@ async function checkForIncomingTxs() {
       );
 
       // Save latest hash to Firestore
-      await axios.post(`${await getLeastBusyServer()}/update-wallet`, {
+      await axios.post(`/update-wallet`, {
         userId,
         lastNotifiedTx: latestTx.hash
       });
