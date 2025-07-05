@@ -19,97 +19,148 @@ app.use(bot.webhookCallback('/telegram-webhook'));
 app.get('/', (req, res) => {
   res.send('Hello! i am alive and Active 🤔');
 });
-const SERVERS = [
-  process.env.SERVER, 
-  process.env.SERVER_2,
-  process.env.SERVER_3,
-  process.env.SERVER_4 
-];
 
-// Start the server
-app.listen(3000, () => {
-  console.log('Server 10100101010010');
+// Add
+const SERVER_NAMES = {
+[process.env.SERVER]: "Server 1",
+[process.env.SERVER_2]: "Server 2",
+[process.env.SERVER_3]: "Server 3",
+[process.env.SERVER_4]: "Server 4"
+};
+
+// Track user's selected server
+const userServers = new Map();
+
+// Modified getLeastBusyServer to include speed test
+async function getServerWithSpeed(userId) {
+const userSelectedServer = userServers.get(userId);
+if (userSelectedServer) {
+return {
+url: userSelectedServer.server,
+name: SERVER_NAMES[userSelectedServer.server] || "Custom",
+speed: userSelectedServer.speed
+};
+}
+
+try {
+const results = await Promise.all(
+SERVERS.map(async (url) => {
+try {
+const start = Date.now();
+await axios.get(${url}/server-status, { timeout: 2000 });
+const speed = Math.min(100, Math.round(1000 / (Date.now() - start)));
+return { url, speed };
+} catch {
+return { url, speed: 0 };
+}
+})
+);
+
+results.sort((a, b) => b.speed - a.speed);  
+return {  
+  url: results[0].url,  
+  name: SERVER_NAMES[results[0].url] || "Fastest",  
+  speed: results[0].speed  
+};
+
+} catch (err) {
+return {
+url: SERVERS[0],
+name: SERVER_NAMES[SERVERS[0]] || "Default",
+speed: 50 // Fallback speed
+};
+}
+}
+
+// Modified callAPI to use user's selected server
+async function callAPI(endpoint, method = 'get', data = {}, userId = null) {
+try {
+const { url } = userId
+? await getServerWithSpeed(userId)
+: await getLeastBusyServer();
+
+const config = {  
+  method,  
+  url: `${url}${endpoint}`,  
+  headers: { 'Content-Type': 'application/json' }  
+};  
+
+method.toLowerCase() === 'get' ? (config.params = data) : (config.data = data);  
+  
+const response = await axios(config);  
+return response.data;
+
+} catch (error) {
+console.error('API Error:', error.message);
+return { error: 'Octra Error' };
+}
+}
+
+// Add this action handler for server switching
+bot.action('switch_server', async (ctx) => {
+const userId = ctx.from.id;
+
+// Rotate to next server
+const current = userServers.get(userId)?.server || SERVERS[0];
+const currentIndex = SERVERS.indexOf(current);
+const nextIndex = (currentIndex + 1) % SERVERS.length;
+const nextServer = SERVERS[nextIndex];
+
+// Test speed
+const start = Date.now();
+try {
+await axios.get(${nextServer}/server-status, { timeout: 2000 });
+const speed = Math.min(100, Math.round(1000 / (Date.now() - start)));
+userServers.set(userId, { server: nextServer, speed });
+
+// Refresh main menu  
+await ctx.answerCbQuery(`Switched to ${SERVER_NAMES[nextServer]} (${speed}% speed)`);  
+await ctx.deleteMessage();  
+return bot.action('main_menu', ctx);
+
+} catch (err) {
+await ctx.answerCbQuery(⚠️ ${SERVER_NAMES[nextServer]} unavailable, try again);
+}
 });
 
-// Session storage for transaction flow
-const sessions = {};
-// Add this at the top with your other constants
-const SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutes
+// Update your start command to show current server
+bot.start(async (ctx) => {
+const userId = String(ctx.from.id);
+const username = ctx.from.username || ctx.from.first_name;
 
-// Add this function to clean up old sessions
-function cleanupSessions() {
-  const now = Date.now();
-  for (const userId in sessions) {
-    if (sessions[userId].lastActivity && now - sessions[userId].lastActivity > SESSION_TIMEOUT) {
-      delete sessions[userId];
-    }
-  }
+// Get server info
+const { name: serverName, speed } = await getServerWithSpeed(userId);
+
+// Rest of your existing start command...
+const walletResponse = await callAPI('/create-wallet', 'post', { userId, username }, userId);
+
+if (!walletResponse || walletResponse.error) {
+return ctx.reply('❌ Failed to access your wallet. Please try again.');
 }
 
-// Update session access to track activity
-function getSession(userId) {
-  if (!sessions[userId]) {
-    sessions[userId] = { lastActivity: Date.now() };
-  } else {
-    sessions[userId].lastActivity = Date.now();
-  }
-  return sessions[userId];
-}
+const balanceInfo = await callAPI(/get-balance/${walletResponse.address}, 'get', {}, userId);
 
-// Run cleanup every hour
-setInterval(cleanupSessions, 60 * 60 * 1000);
-
-//Server test ❗
-async function getLeastBusyServer() {
-  try {
-    const results = await Promise.all(
-      SERVERS.map(async (url) => {
-        try {
-          const res = await axios.get(`${url}/server-status`);
-          return { url, load: res.data.activeRequests ?? Infinity };
-        } catch {
-          return { url, load: Infinity };
-        }
-      })
-    );
-
-    results.sort((a, b) => a.load - b.load);
-    return results[0].url;
-  } catch (err) {
-    console.error('Error checking server load:', err);
-    return SERVERS[0]; // fallback
-  }
-}
-
-async function callAPI(endpoint, method = 'get', data = {}) {
-  try {
-    const baseURL = await getLeastBusyServer();
-
-    const config = {
-      method,
-      url: `${baseURL}${endpoint}`,
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    };
-
-    if (method.toLowerCase() === 'get') {
-      config.params = data;
-    } else {
-      config.data = data;
-    }
-
-    const response = await axios(config);
-    return response.data;
-  } catch (error) {
-    console.error('API Error:', {
-      endpoint,
-      error: error.response?.data || error.message,
-      requestData: data
-    });
-    return { error: 'Octra Error' }; // <== Friendly fallback
-  }
-}
+await ctx.replyWithHTML(
+👋 Welcome, <b>${username}</b>!\n\n +
+🔐 Your Octra Address:\n<code>${walletResponse.address}</code>\n\n +
+💰 Balance: <b>${balanceInfo?.balance || 0} OCT</b>\n +
+⚡ Server: <b>${serverName}</b> (${speed}% speed)\n\n +
+👉 Join our <a href="https://chat.whatsapp.com/FREEb4qOVqKD38IAfA0wUA">WhatsApp Group</a>,
+Markup.inlineKeyboard([
+[
+Markup.button.callback('💸 Send OCT', 'send_octra'),
+Markup.button.callback('📜 Transactions', 'tx_history')
+],
+[
+Markup.button.callback('🔁 Switch Server', 'switch_server'),
+Markup.button.callback('🆘 Support', 'support')
+],
+[
+Markup.button.callback('💫 Auto Transaction', 'premium')
+]
+])
+);
+});
 
 
 //start ✨
@@ -151,47 +202,31 @@ bot.command('keys', async (ctx) => {
   }, 60000); // 60 seconds
 });
 
-// Start command - Updated to check for existing wallet
-bot.start(async (ctx) => {
-  const userId = String(ctx.from.id);
+bot.action('main_menu', async (ctx) => {
+  const userId = ctx.from.id;
   const username = ctx.from.username || ctx.from.first_name;
 
-  
-  // Check or create wallet
-  const walletResponse = await callAPI('/create-wallet', 'post', {
-    userId,
-    username
-  });
-
-  if (!walletResponse || walletResponse.error) {
-    return ctx.reply('❌ Failed to access your wallet. Please try again.');
-  }
-
-  // Fetch balance
-  const balanceInfo = await callAPI(`/get-balance/${walletResponse.address}`);
-
-  const welcomeMessage = walletResponse.exists
-    ? `👋 Welcome back, <b>${username}</b>!`
-    : `🎉 Welcome, <b>${username}</b>! Your new Octra wallet is ready!`;
+  const { name: serverName, speed } = await getServerWithSpeed(userId);
+  const walletResponse = await callAPI('/create-wallet', 'post', { userId, username }, userId);
+  const balanceInfo = await callAPI(`/get-balance/${walletResponse.address}`, 'get', {}, userId);
 
   await ctx.replyWithHTML(
-    `${welcomeMessage}\n\n` +
+    `👋 Welcome, <b>${username}</b>!\n\n` +
     `🔐 Your Octra Address:\n<code>${walletResponse.address}</code>\n\n` +
-    `💰 Balance: <b>${balanceInfo?.balance || 0} OCT</b>\n\n` +
-    `👉 Join our <a href="https://chat.whatsapp.com/FREEb4qOVqKD38IAfA0wUA">WhatsApp Group</a>\n\n` +
-    `Made by @Darlington_W3\n\n\n` +
-    `---Server 10453$__ ✅`,
+    `💰 Balance: <b>${balanceInfo?.balance || 0} OCT</b>\n` +
+    `⚡ Server: <b>${serverName}</b> (${speed}% speed)\n\n` +
+    `👉 Join our <a href="https://chat.whatsapp.com/FREEb4qOVqKD38IAfA0wUA">WhatsApp Group</a>`,
     Markup.inlineKeyboard([
       [
         Markup.button.callback('💸 Send OCT', 'send_octra'),
         Markup.button.callback('📜 Transactions', 'tx_history')
       ],
       [
-        Markup.button.callback('🔑 Switch Wallet', 'switch_wallet'),
+        Markup.button.callback('🔁 Switch Server', 'switch_server'),
         Markup.button.callback('🆘 Support', 'support')
       ],
       [
-        Markup.button.callback('💫Auto Transaction', 'premium')
+        Markup.button.callback('💫 Auto Transaction', 'premium')
       ]
     ])
   );
@@ -471,7 +506,7 @@ bot.action('cancel_tx', async (ctx) => {
 });
 
 // Main menu callback
-bot.action('main_menu', async (ctx) => {
+bot.action('mainmenu', async (ctx) => {
   const userId = ctx.from.id;
   await ctx.deleteMessage();
 
