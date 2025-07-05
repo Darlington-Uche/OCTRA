@@ -98,7 +98,7 @@ app.post('/update-wallet', async (req, res) => {
 // 1. Create/Load Wallet Endpoint - UPDATED
 app.post('/create-wallet', async (req, res) => {
   try {
-    const { userId } = req.body;
+    const { userId, username } = req.body;
     if (!userId) {
       return res.status(400).json({ error: 'User ID is required' });
     }
@@ -143,6 +143,7 @@ app.post('/create-wallet', async (req, res) => {
       privateKey,
       publicKey: publicKey.toString('hex'),
       address,
+      username: username || unknown
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     };
