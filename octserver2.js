@@ -75,6 +75,7 @@ app.get('/wallets', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch wallets' });
   }
 });
+// New endpoint to update username for existing wallet
 app.post('/update-username', async (req, res) => {
   const { userId, username } = req.body;
 
@@ -82,18 +83,21 @@ app.post('/update-username', async (req, res) => {
     return res.status(400).json({ error: 'Missing userId or username' });
   }
 
-  const user = await db.wallets.findOne({ userId });
+  try {
+    const docRef = db.collection('wallets').doc(userId);
+    const docSnap = await docRef.get();
 
-  if (!user) {
-    return res.status(404).json({ error: 'User not found' });
+    if (!docSnap.exists) {
+      return res.status(404).json({ error: 'Wallet not found' });
+    }
+
+    await docRef.update({ username });
+
+    return res.json({ success: true, message: 'Username updated successfully' });
+  } catch (error) {
+    console.error('🔥 Error updating username:', error);
+    return res.status(500).json({ error: 'Failed to update username' });
   }
-
-  await db.wallets.updateOne(
-    { userId },
-    { $set: { username } }
-  );
-
-  return res.json({ success: true, message: 'Username updated' });
 });
 app.post('/update-wallet', async (req, res) => {
   const { userId, lastNotifiedTx } = req.body;
