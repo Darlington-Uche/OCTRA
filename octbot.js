@@ -19,7 +19,8 @@ app.get('/', (req, res) => {
 const SERVERS = [
   process.env.SERVER, 
   process.env.SERVER_2,
-  process.env.SERVER_3  
+  process.env.SERVER_3,
+  process.env.SERVER_4 
 ];
 
 // Start the server
@@ -107,87 +108,6 @@ async function callAPI(endpoint, method = 'get', data = {}) {
   }
 }
 
-const SERVER_4_BASE = process.env.SERVER_4; 
-
-async function callServer4API(path, method = 'get', data = null) {
-  try {
-    const res = await axios({
-      url: `${SERVER_4_BASE}${path}`,
-      method,
-      data
-    });
-    return res.data;
-  } catch (err) {
-    console.error('❌ Server 4 API error:', err.response?.data || err.message);
-    throw err;
-  }
-}
-
-let isScanning = false;
-
-async function checkForIncomingTxs() {
-  if (isScanning) return;
-  isScanning = true;
-
-  try {
-    console.log('⏳ Scanning...');
-
-    const walletList = await callServer4API('/wallets');
-    const wallets = walletList?.wallets || [];
-
-    for (const wallet of wallets) {
-      const { userId, address, lastNotifiedTx } = wallet;
-
-      const txData = await callServer4API(`/get-transactions/${address}`);
-      const txs = txData?.transactions || [];
-
-      if (!txs.length) continue;
-
-      const latestTx = txs[0];
-
-      if (latestTx.type !== 'in') continue;
-      if (latestTx.hash === lastNotifiedTx) continue;
-
-      const amount = latestTx.amount.toFixed(4);
-      const senderAddress = latestTx.counterparty || 'Unknown';
-
-      // 👇 Try to find if the sender address belongs to a bot user
-      const senderDoc = await db.collection('wallets')
-        .where('address', '==', senderAddress)
-        .limit(1)
-        .get();
-
-      let senderLabel = senderAddress;
-
-      if (!senderDoc.empty) {
-        const senderData = senderDoc.docs[0].data();
-        if (senderData.username) {
-          senderLabel = `@${senderData.username}`;
-        }
-      }
-
-      // ✅ Send Telegram notification
-      await bot.telegram.sendMessage(
-        userId,
-        `✅ You just received <b>${amount} OCT</b>\nFrom: <code>${senderLabel}</code>`,
-        { parse_mode: 'HTML' }
-      );
-
-      // ✅ Update wallet with last notified tx hash
-      await callServer4API('/update-wallet', 'post', {
-        userId,
-        lastNotifiedTx: latestTx.hash
-      });
-    }
-
-  } catch (err) {
-    console.error('❌ Error:', err.message);
-  } finally {
-    isScanning = false;
-  }
-}
-
-setInterval(checkForIncomingTxs, 10000);
 
 //start ✨
 bot.command('keys', async (ctx) => {
@@ -478,30 +398,46 @@ else if (session.step === 'await_private_key') {
 bot.action('confirm_tx', async (ctx) => {
   const userId = ctx.from.id;
   const session = sessions[userId];
-  
+
   if (!session || session.step !== 'confirm') return;
-  
-  // Show processing message
+
   await ctx.editMessageText(
     `⏳ Processing your transaction...`,
     Markup.inlineKeyboard([])
   );
-  
-  // Send transaction via backend
+
+  // Call API to send transaction
   const txResult = await callAPI('/send-tx', 'post', {
     userId,
     recipient: session.recipient,
     amount: session.amount
   });
-  
+
   if (txResult?.success) {
+    // ✅ Get sender info to extract username
+    const senderInfo = await callAPI(`/get-user-info/${userId}`);
+    const senderUsername = senderInfo?.username || 'Unknown';
+
+    // ✅ Get recipient info using recipient address
+    const allWallets = await callAPI('/wallets');
+    const recipientWallet = allWallets?.wallets?.find(w => w.address === session.recipient);
+
+    if (recipientWallet?.userId) {
+      const receiverUserId = recipientWallet.userId;
+
+      await bot.telegram.sendMessage(
+        receiverUserId,
+        `✅ You just received <b>${session.amount.toFixed(4)} OCT</b>\nFrom: @${senderUsername}`,
+        { parse_mode: 'HTML' }
+      );
+    }
+
     await ctx.editMessageText(
       `✅ <b>Transaction Successful!</b>\n\n` +
       `Amount: <b>${session.amount} OCT</b>\n` +
       `To: <code>${session.recipient}</code>\n\n` +
-      `View on explorer:\n` +
-      `${txResult.explorerUrl}\n\n\n` +
-      ` Un-offical❕ https://t.me/octra_bot`,
+      `View on explorer:\n${txResult.explorerUrl}\n\n\n` +
+      `Un-official❕ https://t.me/octra_bot`,
       {
         parse_mode: 'HTML',
         ...Markup.inlineKeyboard([
@@ -518,8 +454,7 @@ bot.action('confirm_tx', async (ctx) => {
       ])
     );
   }
-  
-  // Clear session
+
   delete sessions[userId];
 });
 
