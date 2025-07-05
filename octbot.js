@@ -92,7 +92,7 @@ async function getOptimalServer() {
   }
 }
 
-// Enhanced API caller with load awareness
+// Optimized API caller with retry logic
 async function callAPI(endpoint, method = 'get', data = {}, attempt = 0) {
   const MAX_RETRIES = 3;
   
@@ -101,8 +101,8 @@ async function callAPI(endpoint, method = 'get', data = {}, attempt = 0) {
     const config = {
       method,
       url: `${baseURL}${endpoint}`,
-      timeout: 8000, // Slightly shorter timeout
-      headers: {
+      timeout: 10000,
+      headers: { 
         'Content-Type': 'application/json',
         'X-Request-Priority': attempt === 0 ? 'high' : 'retry'
       }
@@ -137,6 +137,13 @@ async function callAPI(endpoint, method = 'get', data = {}, attempt = 0) {
     };
   }
 }
+
+// Session management with TTL (add this back)
+const sessions = new NodeCache({ 
+  stdTTL: 1800, // 30 minute session lifetime
+  deleteOnExpire: true,
+  checkperiod: 600 // Cleanup every 10 minutes
+});
 
 
 //start ✨
