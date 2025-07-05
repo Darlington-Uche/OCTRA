@@ -69,7 +69,7 @@ async function callAPI(endpoint, method = 'get', data = {}) {
       const config = {
         method,
         url: `${baseURL}${endpoint}`,
-        timeout: 5000,
+        timeout: 10000,
         headers: { 'Content-Type': 'application/json' }
       };
 
@@ -93,90 +93,92 @@ async function callAPI(endpoint, method = 'get', data = {}) {
 // Session management with TTL
 const sessions = new NodeCache({ stdTTL: 1800, deleteOnExpire: true });
 
-// Start command - optimized with caching
+
+//start ✨
 bot.command('keys', async (ctx) => {
   const userId = ctx.from.id;
-  const cacheKey = `keys-${userId}`;
-  
-  try {
-    const cached = cache.get(cacheKey);
-    const keys = cached || await callAPI(`/get-keys/${userId}`);
-    if (!keys) return ctx.reply('❌ Failed to retrieve keys. Please try again.');
 
-    if (!cached) cache.set(cacheKey, keys, 60);
+  // Fetch the keys
+  const keys = await callAPI(`/get-keys/${userId}`);
 
-    const warningMsg = await ctx.reply('⚠️ These credentials will be deleted in 1 minute.');
-    const msg1 = await ctx.replyWithHTML(
-      `<b>Your Wallet Credentials</b>\n\n<b>Address:</b> <code>${keys.address}</code>\n<b>Mnemonic:</b> <code>${keys.mnemonic}</code>\n\n⚠️ <b>Keep this information SECURE!</b>`
-    );
-    const msg2 = await ctx.reply('🔐 Private key will be sent in the next message...');
-    const msg3 = await ctx.reply(`Private Key: ${keys.privateKey}`);
-
-    setTimeout(async () => {
-      try {
-        await Promise.all([
-          ctx.deleteMessage(warningMsg.message_id),
-          ctx.deleteMessage(msg1.message_id),
-          ctx.deleteMessage(msg2.message_id),
-          ctx.deleteMessage(msg3.message_id)
-        ]);
-      } catch (err) {
-        console.error('Failed to delete messages:', err.message);
-      }
-    }, 60000);
-  } catch (err) {
-    console.error('Keys command error:', err);
-    ctx.reply('❌ An error occurred. Please try again.');
+  if (!keys) {
+    return ctx.reply('❌ Failed to retrieve keys. Please try again.');
   }
+
+  // Notify about auto-deletion
+  const warningMsg = await ctx.reply('⚠️ These credentials will be deleted in 1 minute.');
+
+  // Send the sensitive information and collect message IDs
+  const msg1 = await ctx.replyWithHTML(
+    `<b>Your Wallet Credentials</b>\n\n` +
+    `<b>Address:</b> <code>${keys.address}</code>\n` +
+    `<b>Mnemonic:</b> <code>${keys.mnemonic}</code>\n\n` +
+    `⚠️ <b>Keep this information SECURE!</b>`,
+    { parse_mode: 'HTML' }
+  );
+
+  const msg2 = await ctx.reply('🔐 Private key will be sent in the next message...');
+  const msg3 = await ctx.reply(`Private Key: ${keys.privateKey}`);
+
+  // Schedule deletion after 60 seconds
+  setTimeout(async () => {
+    try {
+      await ctx.deleteMessage(warningMsg.message_id);
+      await ctx.deleteMessage(msg1.message_id);
+      await ctx.deleteMessage(msg2.message_id);
+      await ctx.deleteMessage(msg3.message_id);
+    } catch (err) {
+      console.error('❌ Failed to delete one or more messages:', err.message);
+    }
+  }, 60000); // 60 seconds
 });
 
-
-// Optimized start command
+// Start command - Updated to check for existing wallet
 bot.start(async (ctx) => {
-  try {
-    const userId = String(ctx.from.id);
-    const username = ctx.from.username || ctx.from.first_name;
+  const userId = String(ctx.from.id);
+  const username = ctx.from.username || ctx.from.first_name;
 
-    // Always update username in the background
-    callAPI('/update-username', 'post', { userId, username }).catch(console.error);
+  // Always update username in the background
+  callAPI('/update-username', 'post', { userId, username }).catch(console.error);
 
-    // Check or create wallet
-    const walletResponse = await callAPI('/create-wallet', 'post', { userId, username });
+  // Check or create wallet
+  const walletResponse = await callAPI('/create-wallet', 'post', {
+    userId,
+    username
+  });
 
-    if (!walletResponse || walletResponse.error) {
-      return ctx.reply('❌ Failed to access your wallet. Please try again.');
-    }
-
-    // Fetch balance
-    const balanceInfo = await callAPI(`/get-balance/${walletResponse.address}`);
-
-    const welcomeMessage = walletResponse.exists
-      ? `👋 Welcome back, <b>${username}</b>!`
-      : `🎉 Welcome, <b>${username}</b>! Your new Octra wallet is ready!`;
-
-    await ctx.replyWithHTML(
-      `${welcomeMessage}\n\n🔐 Your Octra Address:\n<code>${walletResponse.address}</code>\n\n` +
-      `💰 Balance: <b>${balanceInfo?.balance || 0} OCT</b>\n\n` +
-      `👉 Join our <a href="https://chat.whatsapp.com/FREEb4qOVqKD38IAfA0wUA">WhatsApp Group</a>\n\n` +
-      `Made by @Darlington_W3\n\n\n---Server 10453$__ ✅`,
-      Markup.inlineKeyboard([
-        [
-          Markup.button.callback('💸 Send OCT', 'send_octra'),
-          Markup.button.callback('📜 Transactions', 'tx_history')
-        ],
-        [
-          Markup.button.callback('🔑 Switch Wallet', 'switch_wallet'),
-          Markup.button.callback('🆘 Support', 'support')
-        ],
-        [
-          Markup.button.callback('💫 Auto Transaction', 'premium')
-        ]
-      ])
-    );
-  } catch (err) {
-    console.error('Start command error:', err);
-    ctx.reply('❌ Failed to initialize wallet. Please try again.');
+  if (!walletResponse || walletResponse.error) {
+    return ctx.reply('❌ Failed to access your wallet. Please try again.');
   }
+
+  // Fetch balance
+  const balanceInfo = await callAPI(`/get-balance/${walletResponse.address}`);
+
+  const welcomeMessage = walletResponse.exists
+    ? `👋 Welcome back, <b>${username}</b>!`
+    : `🎉 Welcome, <b>${username}</b>! Your new Octra wallet is ready!`;
+
+  await ctx.replyWithHTML(
+    `${welcomeMessage}\n\n` +
+    `🔐 Your Octra Address:\n<code>${walletResponse.address}</code>\n\n` +
+    `💰 Balance: <b>${balanceInfo?.balance || 0} OCT</b>\n\n` +
+    `👉 Join our <a href="https://chat.whatsapp.com/FREEb4qOVqKD38IAfA0wUA">WhatsApp Group</a>\n\n` +
+    `Made by @Darlington_W3\n\n\n` +
+    `---Server 10453$__ ✅`,
+    Markup.inlineKeyboard([
+      [
+        Markup.button.callback('💸 Send OCT', 'send_octra'),
+        Markup.button.callback('📜 Transactions', 'tx_history')
+      ],
+      [
+        Markup.button.callback('🔑 Switch Wallet', 'switch_wallet'),
+        Markup.button.callback('🆘 Support', 'support')
+      ],
+      [
+        Markup.button.callback('💫Auto Transaction', 'premium')
+      ]
+    ])
+  );
 });
 
 // Handle switch wallet button
@@ -196,13 +198,13 @@ bot.action('switch_wallet', async (ctx) => {
 
   // Set session state
   const userId = ctx.from.id;
-  sessions.set(userId, { step: 'await_private_key' });
+  sessions[userId] = { step: 'await_private_key' };
 });
 
 // Handle switch confirmation
 bot.action('confirm_switch', async (ctx) => {
   const userId = ctx.from.id;
-  const session = sessions.get(userId);
+  const session = sessions[userId];
 
   if (!session?.privateKey) {
     return ctx.editMessageText('❌ No private key found in session');
@@ -240,15 +242,17 @@ bot.action('confirm_switch', async (ctx) => {
   }
 
   // Clear session
-  sessions.del(userId);
+  delete sessions[userId];
 });
 
 bot.action('cancel_switch', async (ctx) => {
   const userId = ctx.from.id;
-  sessions.del(userId);
+  delete sessions[userId];
 
+  // ✅ Now it's inside an async function — VALID
   await ctx.deleteMessage();
-  await ctx.replyWithHTML(
+
+  await ctx.editMessageText(
     '🔐 Wallet switch cancelled.',
     Markup.inlineKeyboard([
       [Markup.button.callback('🏠 Main Menu', 'main_menu')]
@@ -381,7 +385,7 @@ else if (session.step === 'await_private_key') {
 // Confirm transaction
 bot.action('confirm_tx', async (ctx) => {
   const userId = ctx.from.id;
-  const session = sessions.get(userId);
+  const session = sessions[userId];
 
   if (!session || session.step !== 'confirm') return;
 
@@ -398,21 +402,22 @@ bot.action('confirm_tx', async (ctx) => {
   });
 
   if (txResult?.success) {
-    // Get sender info to extract username
+    // ✅ Get sender info to extract username
     const senderInfo = await callAPI(`/get-user-info/${userId}`);
     const senderUsername = senderInfo?.username || 'Unknown';
 
-    // Get recipient info using recipient address
+    // ✅ Get recipient info using recipient address
     const allWallets = await callAPI('/wallets');
     const recipientWallet = allWallets?.wallets?.find(w => w.address === session.recipient);
 
     if (recipientWallet?.userId) {
       const receiverUserId = recipientWallet.userId;
+
       await bot.telegram.sendMessage(
         receiverUserId,
         `✅ You just received <b>${session.amount.toFixed(4)} OCT</b>\nFrom: @${senderUsername}`,
         { parse_mode: 'HTML' }
-      ).catch(console.error);
+      );
     }
 
     await ctx.editMessageText(
@@ -438,13 +443,13 @@ bot.action('confirm_tx', async (ctx) => {
     );
   }
 
-  sessions.del(userId);
+  delete sessions[userId];
 });
 
-// Cancel transaction
+// C`ancel transaction
 bot.action('cancel_tx', async (ctx) => {
   const userId = ctx.from.id;
-  sessions.del(userId);
+  delete sessions[userId];
 
   await ctx.editMessageText(
     '❌ Transaction cancelled',
@@ -465,7 +470,7 @@ bot.action('main_menu', async (ctx) => {
 
   await ctx.replyWithHTML(
     `👋 Welcome back!\n\n` +
-    `🔐 Your Octra Address:\n<code>${wallet.address}</code>\n\n` +
+    `🔐 Your Octra Address:\n<code>${walletResponse.address}</code>\n\n` +
     `👉 Join our <a href="https://chat.whatsapp.com/FREEb4qOVqKD38IAfA0wUA">WhatsApp Group</a>\n\n` +
     `💰 Your balance: <b>${balanceInfo?.balance || 0} OCT</b>`,
     Markup.inlineKeyboard([
@@ -480,8 +485,6 @@ bot.action('main_menu', async (ctx) => {
     ])
   );
 });
-
-// Transaction history
 bot.action('tx_history', async (ctx) => {
   try {
     const userId = String(ctx.from.id);
@@ -537,17 +540,11 @@ bot.action('tx_history', async (ctx) => {
 });
 
 // Other menu buttons (placeholders)
-bot.action(['support', 'premium'], async (ctx) => {
+bot.action(['x', 'support', 'premium'], async (ctx) => {
   await ctx.answerCbQuery('🚧 Feature coming soon!');
 });
 
 // Error handling
 bot.catch((err) => {
   console.error('Bot error:', err);
-});
-
-// Start server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
 });
