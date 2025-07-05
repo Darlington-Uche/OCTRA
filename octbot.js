@@ -1,99 +1,116 @@
+ 
+
+
 const express = require('express');
 const axios = require('axios');
 const { Telegraf, Markup } = require('telegraf');
-const NodeCache = require('node-cache');
 
-const bot = new Telegraf(process.env.BOT_TOKEN);
+const bot = new Telegraf(process.env.BOT_TOKEN); // make sure BOT_TOKEN is set
 const app = express();
 const webhookurl = `${process.env.BOT_SERVER}/telegram-webhook`;
 
-// Cache for frequently accessed data
-const cache = new NodeCache({ stdTTL: 60, checkperiod: 120 });
+// This sets the webhook Telegram will call
+bot.telegram.setWebhook(webhookurl);
 
-// Optimized webhook setup
-bot.telegram.setWebhook(webhookurl).catch(console.error);
-app.use(express.json({ limit: '10kb' }));
+// This tells Express how to handle webhook requests from Telegram
 app.use(bot.webhookCallback('/telegram-webhook'));
 
-// Health check endpoint
+// Optional: base route to confirm server is live
 app.get('/', (req, res) => {
   res.send('Hello! i am alive and Active 🤔');
 });
-
 const SERVERS = [
-  process.env.SERVER,
+  process.env.SERVER, 
   process.env.SERVER_2,
   process.env.SERVER_3,
-  process.env.SERVER_4
-].filter(Boolean);
+  process.env.SERVER_4 
+];
 
-let currentServerIndex = 0;
-const serverUsageLog = [];
+// Start the server
+app.listen(3000, () => {
+  console.log('Server 10100101010010');
+});
 
-function getNextServer() {
-  currentServerIndex = (currentServerIndex + 1) % SERVERS.length;
-  const selectedServer = SERVERS[currentServerIndex];
-  
-  // Log the selection
-  serverUsageLog.push({
-    server: selectedServer,
-    timestamp: new Date().toISOString(),
-    requestCount: (serverUsageLog.filter(x => x.server === selectedServer).length || 0) + 1
-  });
-  
-  console.log(`🔄 Selected server ${currentServerIndex + 1}: ${selectedServer}`);
-  return selectedServer;
+// Session storage for transaction flow
+const sessions = {};
+// Add this at the top with your other constants
+const SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutes
+
+// Add this function to clean up old sessions
+function cleanupSessions() {
+  const now = Date.now();
+  for (const userId in sessions) {
+    if (sessions[userId].lastActivity && now - sessions[userId].lastActivity > SESSION_TIMEOUT) {
+      delete sessions[userId];
+    }
+  }
 }
 
-const activeRequests = new Map(); // Track ongoing requests
+// Update session access to track activity
+function getSession(userId) {
+  if (!sessions[userId]) {
+    sessions[userId] = { lastActivity: Date.now() };
+  } else {
+    sessions[userId].lastActivity = Date.now();
+  }
+  return sessions[userId];
+}
+
+// Run cleanup every hour
+setInterval(cleanupSessions, 60 * 60 * 1000);
+
+//Server test ❗
+async function getLeastBusyServer() {
+  try {
+    const results = await Promise.all(
+      SERVERS.map(async (url) => {
+        try {
+          const res = await axios.get(`${url}/server-status`);
+          return { url, load: res.data.activeRequests ?? Infinity };
+        } catch {
+          return { url, load: Infinity };
+        }
+      })
+    );
+
+    results.sort((a, b) => a.load - b.load);
+    return results[0].url;
+  } catch (err) {
+    console.error('Error checking server load:', err);
+    return SERVERS[0]; // fallback
+  }
+}
 
 async function callAPI(endpoint, method = 'get', data = {}) {
-  const requestId = crypto.randomUUID();
-  const server = getNextServer();
-  
-  activeRequests.set(requestId, { server, start: Date.now() });
-
   try {
-    const result = await axios({
+    const baseURL = await getLeastBusyServer();
+
+    const config = {
       method,
-      url: `${server}${endpoint}`,
-      timeout: 15000, // Longer timeout for crypto ops
-      data: method !== 'get' ? data : undefined,
-      params: method === 'get' ? data : undefined,
+      url: `${baseURL}${endpoint}`,
       headers: {
-        'X-Request-ID': requestId,
-        'X-Atomic': 'true' // Tell server not to switch
+        'Content-Type': 'application/json'
       }
+    };
+
+    if (method.toLowerCase() === 'get') {
+      config.params = data;
+    } else {
+      config.data = data;
+    }
+
+    const response = await axios(config);
+    return response.data;
+  } catch (error) {
+    console.error('API Error:', {
+      endpoint,
+      error: error.response?.data || error.message,
+      requestData: data
     });
-
-    return result.data;
-  } finally {
-    activeRequests.delete(requestId);
+    return { error: 'Octra Error' }; // <== Friendly fallback
   }
 }
 
-function getNextServer() {
-  // Only switch if no pending atomic requests
-  if ([...activeRequests.values()].every(req => !req.headers?.['X-Atomic'])) {
-    currentServerIndex = (currentServerIndex + 1) % SERVERS.length;
-  }
-  return SERVERS[currentServerIndex];
-}
-
-// Log server usage every 5 minutes
-setInterval(() => {
-  console.log('📊 Server Usage Report:');
-  SERVERS.forEach((server, index) => {
-    const count = serverUsageLog.filter(x => x.server === server).length;
-    console.log(`Server ${index + 1}: ${count} requests (${server})`);
-  });
-}, 300000);
-
-// Session management
-const sessions = new NodeCache({ 
-  stdTTL: 1800, // 30 minute TTL
-  checkperiod: 600 // Cleanup every 10 minutes
-});
 
 //start ✨
 bot.command('keys', async (ctx) => {
@@ -138,6 +155,9 @@ bot.command('keys', async (ctx) => {
 bot.start(async (ctx) => {
   const userId = String(ctx.from.id);
   const username = ctx.from.username || ctx.from.first_name;
+
+  // Always update username in the background
+  callAPI('/update-username', 'post', { userId, username }).catch(console.error);
 
   // Check or create wallet
   const walletResponse = await callAPI('/create-wallet', 'post', {
@@ -384,7 +404,6 @@ else if (session.step === 'await_private_key') {
 bot.action('confirm_tx', async (ctx) => {
   const userId = ctx.from.id;
   const session = sessions[userId];
-  const senderUsername = ctx.from.username || ctx.from.first_name;
 
   if (!session || session.step !== 'confirm') return;
 
@@ -401,16 +420,22 @@ bot.action('confirm_tx', async (ctx) => {
   });
 
   if (txResult?.success) {
-    // Get recipient info using recipient address
+    // ✅ Get sender info to extract username
+    const senderInfo = await callAPI(`/get-user-info/${userId}`);
+    const senderUsername = senderInfo?.username || 'Unknown';
+
+    // ✅ Get recipient info using recipient address
     const allWallets = await callAPI('/wallets');
     const recipientWallet = allWallets?.wallets?.find(w => w.address === session.recipient);
 
     if (recipientWallet?.userId) {
+      const receiverUserId = recipientWallet.userId;
+
       await bot.telegram.sendMessage(
-        recipientWallet.userId,
-        `✅ You just received <b>${session.amount.toFixed(4)} OCT</b>\nFrom: ${senderUsername ? '@' + senderUsername : 'a user'}`,
+        receiverUserId,
+        `✅ You just received <b>${session.amount.toFixed(4)} OCT</b>\nFrom: @${senderUsername}`,
         { parse_mode: 'HTML' }
-      ).catch(console.error); // Silently handle message failures
+      );
     }
 
     await ctx.editMessageText(
@@ -438,6 +463,7 @@ bot.action('confirm_tx', async (ctx) => {
 
   delete sessions[userId];
 });
+
 // C`ancel transaction
 bot.action('cancel_tx', async (ctx) => {
   const userId = ctx.from.id;
@@ -535,11 +561,7 @@ bot.action('tx_history', async (ctx) => {
 bot.action(['x', 'support', 'premium'], async (ctx) => {
   await ctx.answerCbQuery('🚧 Feature coming soon!');
 });
-// Start server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+
 // Error handling
 bot.catch((err) => {
   console.error('Bot error:', err);
