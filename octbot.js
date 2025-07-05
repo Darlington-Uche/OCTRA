@@ -141,7 +141,7 @@ bot.start(async (ctx) => {
   try {
     const [walletResponse, balanceInfo] = await Promise.all([
       callAPI('/create-wallet', 'post', { userId, username }),
-      callAPI(`/get-balance/${userId}`)
+      callAPI(`/get-balance/${walletResponse.address}`)
     ]);
 
     if (!walletResponse) return ctx.reply('❌ Failed to access your wallet. Please try again.');
