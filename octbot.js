@@ -18,7 +18,8 @@ app.get('/', (req, res) => {
 });
 const SERVERS = [
   process.env.SERVER, 
-  process.env.SERVER_2  
+  process.env.SERVER_2
+  process.env.SERVER_3  
 ];
 
 // Start the server
@@ -105,9 +106,14 @@ async function callAPI(endpoint, method = 'get', data = {}) {
     return { error: 'Octra Error' }; // <== Friendly fallback
   }
 }
-setInterval(checkForIncomingTxs, 60000); // every 1munite
+let isScanning = false;
+
 async function checkForIncomingTxs() {
+  if (isScanning) return;
+  isScanning = true;
+
   try {
+    console.log('⏳ Scanning...');
     // Fetch all wallets from the backend
     const walletList = await callAPI('/wallets');
     const wallets = walletList?.wallets || [];
@@ -144,9 +150,14 @@ async function checkForIncomingTxs() {
       });
     }
   } catch (err) {
-    console.error('❌ Error in TX scan:', err.message);
+    console.error('❌ Error:', err.message);
+  } finally {
+    isScanning = false;
   }
 }
+setInterval(checkForIncomingTxs, 10000);
+
+//start ✨
 bot.command('keys', async (ctx) => {
   const userId = ctx.from.id;
 
