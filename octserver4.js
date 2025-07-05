@@ -164,7 +164,26 @@ app.post('/create-wallet', async (req, res) => {
     });
   }
 });
+app.post('/update-username', async (req, res) => {
+  const { userId, username } = req.body;
 
+  if (!userId || !username) {
+    return res.status(400).json({ error: 'Missing userId or username' });
+  }
+
+  const user = await db.wallets.findOne({ userId });
+
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  await db.wallets.updateOne(
+    { userId },
+    { $set: { username } }
+  );
+
+  return res.json({ success: true, message: 'Username updated' });
+});
 
 // Update your existing get-user-info endpoint
 app.get('/get-user-info/:userId', async (req, res) => {
