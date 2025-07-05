@@ -45,37 +45,39 @@ function getNextServer() {
   return selectedServer;
 }
 
-async function callAPI(endpoint, method = 'get', data = {}, attempt = 0) {
-  const MAX_RETRIES = SERVERS.length; // Maximum tries equals number of servers
+const activeRequests = new Map(); // Track ongoing requests
+
+async function callAPI(endpoint, method = 'get', data = {}) {
+  const requestId = crypto.randomUUID();
+  const server = getNextServer();
   
+  activeRequests.set(requestId, { server, start: Date.now() });
+
   try {
-    const baseURL = getNextServer();
-    const config = {
+    const result = await axios({
       method,
-      url: `${baseURL}${endpoint}`,
-      timeout: 5000,
-      headers: { 'Content-Type': 'application/json' }
-    };
+      url: `${server}${endpoint}`,
+      timeout: 15000, // Longer timeout for crypto ops
+      data: method !== 'get' ? data : undefined,
+      params: method === 'get' ? data : undefined,
+      headers: {
+        'X-Request-ID': requestId,
+        'X-Atomic': 'true' // Tell server not to switch
+      }
+    });
 
-    method.toLowerCase() === 'get' ? (config.params = data) : (config.data = data);
-
-    const response = await axios(config);
-    return response.data;
-
-  } catch (error) {
-    if (attempt < MAX_RETRIES - 1) {
-      console.warn(`Attempt ${attempt + 1} failed, rotating server...`);
-      await new Promise(r => setTimeout(r, 200 * (attempt + 1)));
-      return callAPI(endpoint, method, data, attempt + 1);
-    }
-    
-    throw {
-      endpoint,
-      error: error.message,
-      lastServer: SERVERS[currentServerIndex],
-      attemptedServers: [...new Set(serverUsageLog.map(x => x.server))]
-    };
+    return result.data;
+  } finally {
+    activeRequests.delete(requestId);
   }
+}
+
+function getNextServer() {
+  // Only switch if no pending atomic requests
+  if ([...activeRequests.values()].every(req => !req.headers?.['X-Atomic'])) {
+    currentServerIndex = (currentServerIndex + 1) % SERVERS.length;
+  }
+  return SERVERS[currentServerIndex];
 }
 
 // Log server usage every 5 minutes
