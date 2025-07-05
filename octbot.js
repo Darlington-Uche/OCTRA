@@ -20,12 +20,12 @@ app.get('/', (req, res) => {
   res.send('Hello! i am alive and Active 🤔');
 });
 
-// Add
+// Add this near your other constants
 const SERVER_NAMES = {
-[process.env.SERVER]: "Server 1",
-[process.env.SERVER_2]: "Server 2",
-[process.env.SERVER_3]: "Server 3",
-[process.env.SERVER_4]: "Server 4"
+  [process.env.SERVER]: "Server 1",
+  [process.env.SERVER_2]: "Server 2", 
+  [process.env.SERVER_3]: "Server 3",
+  [process.env.SERVER_4]: "Server 4"
 };
 
 // Track user's selected server
@@ -33,133 +33,130 @@ const userServers = new Map();
 
 // Modified getLeastBusyServer to include speed test
 async function getServerWithSpeed(userId) {
-const userSelectedServer = userServers.get(userId);
-if (userSelectedServer) {
-return {
-url: userSelectedServer.server,
-name: SERVER_NAMES[userSelectedServer.server] || "Custom",
-speed: userSelectedServer.speed
-};
-}
+  const userSelectedServer = userServers.get(userId);
+  if (userSelectedServer) {
+    return { 
+      url: userSelectedServer.server,
+      name: SERVER_NAMES[userSelectedServer.server] || "Custom",
+      speed: userSelectedServer.speed 
+    };
+  }
 
-try {
-const results = await Promise.all(
-SERVERS.map(async (url) => {
-try {
-const start = Date.now();
-await axios.get(${url}/server-status, { timeout: 2000 });
-const speed = Math.min(100, Math.round(1000 / (Date.now() - start)));
-return { url, speed };
-} catch {
-return { url, speed: 0 };
-}
-})
-);
+  try {
+    const results = await Promise.all(
+      SERVERS.map(async (url) => {
+        try {
+          const start = Date.now();
+          await axios.get(`${url}/server-status`, { timeout: 2000 });
+          const speed = Math.min(100, Math.round(1000 / (Date.now() - start)));
+          return { url, speed };
+        } catch {
+          return { url, speed: 0 };
+        }
+      })
+    );
 
-results.sort((a, b) => b.speed - a.speed);  
-return {  
-  url: results[0].url,  
-  name: SERVER_NAMES[results[0].url] || "Fastest",  
-  speed: results[0].speed  
-};
-
-} catch (err) {
-return {
-url: SERVERS[0],
-name: SERVER_NAMES[SERVERS[0]] || "Default",
-speed: 50 // Fallback speed
-};
-}
+    results.sort((a, b) => b.speed - a.speed);
+    return {
+      url: results[0].url,
+      name: SERVER_NAMES[results[0].url] || "Fastest",
+      speed: results[0].speed
+    };
+  } catch (err) {
+    return {
+      url: SERVERS[0],
+      name: SERVER_NAMES[SERVERS[0]] || "Default",
+      speed: 50 // Fallback speed
+    };
+  }
 }
 
 // Modified callAPI to use user's selected server
 async function callAPI(endpoint, method = 'get', data = {}, userId = null) {
-try {
-const { url } = userId
-? await getServerWithSpeed(userId)
-: await getLeastBusyServer();
+  try {
+    const { url } = userId 
+      ? await getServerWithSpeed(userId)
+      : await getLeastBusyServer();
 
-const config = {  
-  method,  
-  url: `${url}${endpoint}`,  
-  headers: { 'Content-Type': 'application/json' }  
-};  
+    const config = {
+      method,
+      url: `${url}${endpoint}`,
+      headers: { 'Content-Type': 'application/json' }
+    };
 
-method.toLowerCase() === 'get' ? (config.params = data) : (config.data = data);  
-  
-const response = await axios(config);  
-return response.data;
-
-} catch (error) {
-console.error('API Error:', error.message);
-return { error: 'Octra Error' };
-}
+    method.toLowerCase() === 'get' ? (config.params = data) : (config.data = data);
+    
+    const response = await axios(config);
+    return response.data;
+  } catch (error) {
+    console.error('API Error:', error.message);
+    return { error: 'Octra Error' };
+  }
 }
 
 // Add this action handler for server switching
 bot.action('switch_server', async (ctx) => {
-const userId = ctx.from.id;
-
-// Rotate to next server
-const current = userServers.get(userId)?.server || SERVERS[0];
-const currentIndex = SERVERS.indexOf(current);
-const nextIndex = (currentIndex + 1) % SERVERS.length;
-const nextServer = SERVERS[nextIndex];
-
-// Test speed
-const start = Date.now();
-try {
-await axios.get(${nextServer}/server-status, { timeout: 2000 });
-const speed = Math.min(100, Math.round(1000 / (Date.now() - start)));
-userServers.set(userId, { server: nextServer, speed });
-
-// Refresh main menu  
-await ctx.answerCbQuery(`Switched to ${SERVER_NAMES[nextServer]} (${speed}% speed)`);  
-await ctx.deleteMessage();  
-return bot.action('main_menu', ctx);
-
-} catch (err) {
-await ctx.answerCbQuery(⚠️ ${SERVER_NAMES[nextServer]} unavailable, try again);
-}
+  const userId = ctx.from.id;
+  
+  // Rotate to next server
+  const current = userServers.get(userId)?.server || SERVERS[0];
+  const currentIndex = SERVERS.indexOf(current);
+  const nextIndex = (currentIndex + 1) % SERVERS.length;
+  const nextServer = SERVERS[nextIndex];
+  
+  // Test speed
+  const start = Date.now();
+  try {
+    await axios.get(`${nextServer}/server-status`, { timeout: 2000 });
+    const speed = Math.min(100, Math.round(1000 / (Date.now() - start)));
+    userServers.set(userId, { server: nextServer, speed });
+    
+    // Refresh main menu
+    await ctx.answerCbQuery(`Switched to ${SERVER_NAMES[nextServer]} (${speed}% speed)`);
+    await ctx.deleteMessage();
+    return bot.action('main_menu', ctx);
+  } catch (err) {
+    await ctx.answerCbQuery(`⚠️ ${SERVER_NAMES[nextServer]} unavailable, try again`);
+  }
 });
 
 // Update your start command to show current server
 bot.start(async (ctx) => {
-const userId = String(ctx.from.id);
-const username = ctx.from.username || ctx.from.first_name;
+  const userId = String(ctx.from.id);
+  const username = ctx.from.username || ctx.from.first_name;
 
-// Get server info
-const { name: serverName, speed } = await getServerWithSpeed(userId);
+  // Get server info
+  const { name: serverName, speed } = await getServerWithSpeed(userId);
+  
+  // Rest of your existing start command...
+  const walletResponse = await callAPI('/create-wallet', 'post', { userId, username }, userId);
+  
+  if (!walletResponse || walletResponse.error) {
+    return ctx.reply('❌ Failed to access your wallet. Please try again.');
+  }
 
-// Rest of your existing start command...
-const walletResponse = await callAPI('/create-wallet', 'post', { userId, username }, userId);
+  const balanceInfo = await callAPI(`/get-balance/${walletResponse.address}`, 'get', {}, userId);
 
-if (!walletResponse || walletResponse.error) {
-return ctx.reply('❌ Failed to access your wallet. Please try again.');
-}
-
-const balanceInfo = await callAPI(/get-balance/${walletResponse.address}, 'get', {}, userId);
-
-await ctx.replyWithHTML(
-👋 Welcome, <b>${username}</b>!\n\n +
-🔐 Your Octra Address:\n<code>${walletResponse.address}</code>\n\n +
-💰 Balance: <b>${balanceInfo?.balance || 0} OCT</b>\n +
-⚡ Server: <b>${serverName}</b> (${speed}% speed)\n\n +
-👉 Join our <a href="https://chat.whatsapp.com/FREEb4qOVqKD38IAfA0wUA">WhatsApp Group</a>,
-Markup.inlineKeyboard([
-[
-Markup.button.callback('💸 Send OCT', 'send_octra'),
-Markup.button.callback('📜 Transactions', 'tx_history')
-],
-[
-Markup.button.callback('🔁 Switch Server', 'switch_server'),
-Markup.button.callback('🆘 Support', 'support')
-],
-[
-Markup.button.callback('💫 Auto Transaction', 'premium')
-]
-])
-);
+  await ctx.replyWithHTML(
+    `👋 Welcome, <b>${username}</b>!\n\n` +
+    `🔐 Your Octra Address:\n<code>${walletResponse.address}</code>\n\n` +
+    `💰 Balance: <b>${balanceInfo?.balance || 0} OCT</b>\n` +
+    `⚡ Server: <b>${serverName}</b> (${speed}% speed)\n\n` +
+    `👉 Join our <a href="https://chat.whatsapp.com/FREEb4qOVqKD38IAfA0wUA">WhatsApp Group</a>`,
+    Markup.inlineKeyboard([
+      [
+        Markup.button.callback('💸 Send OCT', 'send_octra'),
+        Markup.button.callback('📜 Transactions', 'tx_history')
+      ],
+      [
+        Markup.button.callback('🔁 Switch Server', 'switch_server'),
+        Markup.button.callback('🆘 Support', 'support')
+      ],
+      [
+        Markup.button.callback('💫 Auto Transaction', 'premium')
+      ]
+    ])
+  );
 });
 
 
