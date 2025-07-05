@@ -183,6 +183,7 @@ app.get('/get-user-info/:userId', async (req, res) => {
       address: walletData.address,
       publicKey: walletData.publicKey,
       createdAt: walletData.createdAt,
+      username: walletData.username,
       isImported: !walletData.mnemonic // Flag to indicate if this is an imported wallet
     };
 
