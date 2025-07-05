@@ -18,7 +18,7 @@ app.get('/', (req, res) => {
 });
 const SERVERS = [
   process.env.SERVER, 
-  process.env.SERVER_2
+  process.env.SERVER_2,
   process.env.SERVER_3  
 ];
 
