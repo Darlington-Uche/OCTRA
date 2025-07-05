@@ -200,6 +200,7 @@ async function showMainMenu(ctx) {
       ],
       [
         Markup.button.callback('💫 Auto Transaction', 'premium')
+        Markup.button.callback('🌀Switch wallet', 'switch_wallet')
       ]
     ])
   );
