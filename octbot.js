@@ -402,7 +402,7 @@ else if (session.step === 'await_private_key') {
 
   await ctx.deleteMessage();
 }
-
+});
 // Confirm transaction
 bot.action('confirm_tx', async (ctx) => {
   const userId = ctx.from.id;
