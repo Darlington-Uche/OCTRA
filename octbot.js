@@ -134,17 +134,22 @@ bot.command('keys', async (ctx) => {
 bot.start(async (ctx) => {
   const userId = String(ctx.from.id);
   const username = ctx.from.username || ctx.from.first_name;
-
-  // Fire-and-forget username update
+  
+  // Always update username in the background
   callAPI('/update-username', 'post', { userId, username }).catch(console.error);
 
-  try {
-    const [walletResponse, balanceInfo] = await Promise.all([
-      callAPI('/create-wallet', 'post', { userId, username }),
-      callAPI(`/get-balance/${walletResponse.address}`)
-    ]);
+  // Check or create wallet
+  const walletResponse = await callAPI('/create-wallet', 'post', {
+    userId,
+    username
+  });
 
-    if (!walletResponse) return ctx.reply('❌ Failed to access your wallet. Please try again.');
+  if (!walletResponse || walletResponse.error) {
+    return ctx.reply('❌ Failed to access your wallet. Please try again.');
+  }
+
+  // Fetch balance
+  const balanceInfo = await callAPI(`/get-balance/${walletResponse.address}`);
 
     const welcomeMessage = walletResponse.exists
       ? `👋 Welcome back, <b>${username}</b>!`
