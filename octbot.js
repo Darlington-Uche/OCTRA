@@ -21,130 +21,77 @@ app.get('/', (req, res) => {
 });
 
 const SERVERS = [
-  { url: process.env.SERVER, rateLimit: 100 }, 
-  { url: process.env.SERVER_2, rateLimit: 150 },
-  { url: process.env.SERVER_3, rateLimit: 200 },
-  { url: process.env.SERVER_4, rateLimit: 250 }
-].filter(server => server.url);
+  process.env.SERVER,
+  process.env.SERVER_2,
+  process.env.SERVER_3,
+  process.env.SERVER_4
+].filter(Boolean);
 
-// Enhanced server scoring system
-async function evaluateServer(server) {
-  try {
-    const startTime = Date.now();
-    const response = await axios.get(`${server.url}/server-status`, {
-      timeout: 1500,
-      headers: { 'X-Monitor': 'true' } // Special header for monitoring
-    });
-    
-    const responseTime = Date.now() - startTime;
-    const { activeRequests, rateLimitRemaining } = response.data;
-    
-    // Calculate dynamic score (higher is better)
-    return {
-      url: server.url,
-      score: Math.max(0, 
-        (server.rateLimit * 0.6) + // Base rate limit weight (60%)
-        (rateLimitRemaining * 0.3) + // Current availability (30%)
-        (1000 - responseTime) * 0.1 - // Speed bonus (10%)
-        (activeRequests * 0.2) // Load penalty
-      )
-    };
-  } catch (error) {
-    return { url: server.url, score: -Infinity }; // Mark failed servers
-  }
+let currentServerIndex = 0;
+const serverUsageLog = [];
+
+function getNextServer() {
+  currentServerIndex = (currentServerIndex + 1) % SERVERS.length;
+  const selectedServer = SERVERS[currentServerIndex];
+  
+  // Log the selection
+  serverUsageLog.push({
+    server: selectedServer,
+    timestamp: new Date().toISOString(),
+    requestCount: (serverUsageLog.filter(x => x.server === selectedServer).length || 0) + 1
+  });
+  
+  console.log(`🔄 Selected server ${currentServerIndex + 1}: ${selectedServer}`);
+  return selectedServer;
 }
 
-// Optimized server selection with circuit breaker
-async function getOptimalServer() {
-  const cacheKey = 'optimal-server';
-  const cached = cache.get(cacheKey);
-  if (cached) return cached;
-
-  try {
-    const evaluations = await Promise.all(
-      SERVERS.map(server => evaluateServer(server))
-    );
-
-    // Filter out failed servers and sort by score
-    const validServers = evaluations
-      .filter(server => server.score > 0)
-      .sort((a, b) => b.score - a.score);
-
-    if (validServers.length === 0) {
-      console.warn('No healthy servers available, using fallback');
-      return SERVERS[0].url;
-    }
-
-    const bestServer = validServers[0].url;
-    cache.set(cacheKey, bestServer, 15); // Shorter cache (15s) for dynamic environments
-    
-    // Log selection details
-    console.log('Server selected:', {
-      chosen: bestServer,
-      alternatives: validServers.slice(1, 3).map(s => s.url),
-      scores: validServers.map(s => ({ url: s.url, score: s.score.toFixed(2) }))
-    });
-
-    return bestServer;
-  } catch (err) {
-    console.error('Server evaluation failed:', err);
-    return SERVERS[0].url; // Fallback to primary server
-  }
-}
-
-// Optimized API caller with retry logic
 async function callAPI(endpoint, method = 'get', data = {}, attempt = 0) {
-  const MAX_RETRIES = 3;
+  const MAX_RETRIES = SERVERS.length; // Maximum tries equals number of servers
   
   try {
-    const baseURL = await getOptimalServer();
+    const baseURL = getNextServer();
     const config = {
       method,
       url: `${baseURL}${endpoint}`,
-      timeout: 10000,
-      headers: { 
-        'Content-Type': 'application/json',
-        'X-Request-Priority': attempt === 0 ? 'high' : 'retry'
-      }
+      timeout: 5000,
+      headers: { 'Content-Type': 'application/json' }
     };
 
-    if (method.toLowerCase() === 'get') {
-      config.params = data;
-    } else {
-      config.data = data;
-    }
+    method.toLowerCase() === 'get' ? (config.params = data) : (config.data = data);
 
     const response = await axios(config);
-    
-    // Update server rating based on performance
-    if (response.headers['x-rate-limit-remaining']) {
-      cache.del('optimal-server'); // Force re-evaluation next call
-    }
-    
     return response.data;
-    
+
   } catch (error) {
     if (attempt < MAX_RETRIES - 1) {
-      const delay = Math.min(2000, 500 * Math.pow(2, attempt));
-      await new Promise(r => setTimeout(r, delay));
+      console.warn(`Attempt ${attempt + 1} failed, rotating server...`);
+      await new Promise(r => setTimeout(r, 200 * (attempt + 1)));
       return callAPI(endpoint, method, data, attempt + 1);
     }
     
     throw {
       endpoint,
-      error: error.response?.data || error.message,
-      lastServer: error.config?.url
+      error: error.message,
+      lastServer: SERVERS[currentServerIndex],
+      attemptedServers: [...new Set(serverUsageLog.map(x => x.server))]
     };
   }
 }
 
-// Session management with TTL (add this back)
+// Log server usage every 5 minutes
+setInterval(() => {
+  console.log('📊 Server Usage Report:');
+  SERVERS.forEach((server, index) => {
+    const count = serverUsageLog.filter(x => x.server === server).length;
+    console.log(`Server ${index + 1}: ${count} requests (${server})`);
+  });
+}, 300000);
+
+// Session management
 const sessions = new NodeCache({ 
-  stdTTL: 1800, // 30 minute session lifetime
-  deleteOnExpire: true,
+  stdTTL: 1800, // 30 minute TTL
   checkperiod: 600 // Cleanup every 10 minutes
 });
-
 
 //start ✨
 bot.command('keys', async (ctx) => {
