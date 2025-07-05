@@ -267,10 +267,10 @@ bot.action('send_octra', async (ctx) => {
   }
 
   // Initialize session
-  sessions.set(userId, { 
+  sessions[userId] = { 
     step: 'await_address',
     walletAddress: wallet.address 
-  });
+  };
 
   await ctx.editMessageText(
     `✉️ <b>Send Octra</b>\n\n` +
@@ -289,7 +289,7 @@ bot.action('send_octra', async (ctx) => {
 // Transaction amount step
 bot.on('text', async (ctx) => {
   const userId = ctx.from.id;
-  const session = sessions.get(userId);
+  const session = sessions[userId];
 
   if (!session) return;
 
@@ -301,7 +301,6 @@ bot.on('text', async (ctx) => {
 
     session.recipient = ctx.message.text;
     session.step = 'await_amount';
-    sessions.set(userId, session);
 
     // Get current balance
     const balanceInfo = await callAPI(`/get-balance/${session.walletAddress}`);
@@ -314,35 +313,36 @@ bot.on('text', async (ctx) => {
       ])
     );
     await ctx.deleteMessage();
+}
+
+else if (session.step === 'await_private_key') {
+  const privateKey = ctx.message.text.trim();
+  const userId = ctx.from.id;
+
+  // Basic validation (adjust according to your blockchain's private key format)
+  if (!privateKey || privateKey.length < 30) {
+    return ctx.reply('❌ Invalid private key format. Please try again.');
   }
-  else if (session.step === 'await_private_key') {
-    const privateKey = ctx.message.text.trim();
-    const userId = ctx.from.id;
 
-    // Basic validation
-    if (!privateKey || privateKey.length < 30) {
-      return ctx.reply('❌ Invalid private key format. Please try again.');
-    }
+  // Store private key in session for confirmation
+  sessions[userId].privateKey = privateKey;
 
-    // Store private key in session for confirmation
-    sessions.set(userId, { ...session, privateKey });
+  // Show confirmation
+  await ctx.replyWithHTML(
+    '⚠️ <b>Confirm Wallet Switch</b>\n\n' +
+    'You are about to replace your current wallet with a new one.\n\n' +
+    'This action cannot be undone!',
+    Markup.inlineKeyboard([
+      [
+        Markup.button.callback('✅ Confirm Switch', 'confirm_switch'),
+        Markup.button.callback('🚫 Cancel', 'cancel_switch')
+      ]
+    ])
+  );
 
-    // Show confirmation
-    await ctx.replyWithHTML(
-      '⚠️ <b>Confirm Wallet Switch</b>\n\n' +
-      'You are about to replace your current wallet with a new one.\n\n' +
-      'This action cannot be undone!',
-      Markup.inlineKeyboard([
-        [
-          Markup.button.callback('✅ Confirm Switch', 'confirm_switch'),
-          Markup.button.callback('🚫 Cancel', 'cancel_switch')
-        ]
-      ])
-    );
-
-    // Delete the private key message for security
-    await ctx.deleteMessage();
-  }
+  // Delete the private key message for security
+  await ctx.deleteMessage();
+}
   else if (session.step === 'await_amount') {
     const amount = parseFloat(ctx.message.text);
 
@@ -360,7 +360,6 @@ bot.on('text', async (ctx) => {
 
     session.amount = amount;
     session.step = 'confirm';
-    sessions.set(userId, session);
 
     await ctx.replyWithHTML(
       `🔍 <b>Confirm Transaction</b>\n\n` +
