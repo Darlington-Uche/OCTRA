@@ -143,7 +143,7 @@ app.post('/create-wallet', async (req, res) => {
       privateKey,
       publicKey: publicKey.toString('hex'),
       address,
-      username: username || unknown
+      username: username || unknown,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     };
