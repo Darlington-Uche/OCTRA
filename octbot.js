@@ -577,7 +577,7 @@ bot.action('confirm_multi_tx', async (ctx) => {
 
       // Add delay between transactions (1.5 seconds)
       if (processedCount < session.recipients.length) {
-        await delay(1500);
+        await delay(45000);
       }
     }
 
