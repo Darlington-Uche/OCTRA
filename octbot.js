@@ -187,13 +187,13 @@ async function showMainMenu(ctx) {
   // Store wallet and balance in session
   sessions[userId] = {
     walletAddress: walletResponse.address,
-    balance: balanceInfo?.balance || 0
+    balance: balanceInfo?.balance || Erorr continue Your action 
   };
 
   await ctx.replyWithHTML(
     `👋 Welcome, <b>${username}</b>!\n\n` +
     `🔐 Your Octra Address:\n<code>${walletResponse.address}</code>\n\n` +
-    `💰 Balance: <b>${balanceInfo?.balance || 0} OCT</b>\n` +
+    `💰 Balance: <b>${balanceInfo?.balance || Octra Error you Can still send Though} OCT</b>\n` +
     `⚡ Server: <b>${serverName}</b> (${speed}% speed)\n\n` +
     `👉 Join our <a href="https://chat.whatsapp.com/FREEb4qOVqKD38IAfA0wUA">WhatsApp Group</a>`,
     Markup.inlineKeyboard([
