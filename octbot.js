@@ -294,7 +294,6 @@ bot.action('cancel_switch', async (ctx) => {
 
 bot.action('send_octra', async (ctx) => {
   const userId = ctx.from.id;
-
   const session = sessions[userId] || {};
   const walletAddress = session.walletAddress;
 
@@ -302,17 +301,37 @@ bot.action('send_octra', async (ctx) => {
     return ctx.reply('❌ Wallet not initialized. Please use /start first.');
   }
 
+  await ctx.editMessageText(
+    `✉️ <b>Send Octra</b>\n\n` +
+    `Choose send option:\n\n` +
+    `My address: <code>${walletAddress}</code>\n\n` +
+    `You can send Here <code>oct4M33BxGEUXSdUDLgt9tpZx64NYwd5Fkw6QMV3Pei7hGa</code>`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('🔹 Single Send', 'single_send')],
+        [Markup.button.callback('🔸 Multi Send', 'multi_send')],
+        [Markup.button.callback('🚫 Cancel', 'cancel_tx')]
+      ])
+    }
+  );
+});
+
+// Single send option (your existing code)
+bot.action('single_send', async (ctx) => {
+  const userId = ctx.from.id;
+  const session = sessions[userId] || {};
+  
   // Reinitialize session but preserve wallet & balance
   sessions[userId] = {
     ...session,
-    step: 'await_address'
+    step: 'await_address',
+    sendType: 'single'
   };
 
   await ctx.editMessageText(
-    `✉️ <b>Send Octra</b>\n\n` +
-    `Enter the recipient address:\n\n` +
-    `My address: <code>${walletAddress}</code>\n\n` +
-    `You can send Here <code>oct4M33BxGEUXSdUDLgt9tpZx64NYwd5Fkw6QMV3Pei7hGa</code>`,
+    `✉️ <b>Single Send</b>\n\n` +
+    `Enter the recipient address:`,
     {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
@@ -322,6 +341,34 @@ bot.action('send_octra', async (ctx) => {
   );
 });
 
+// Multi-send option
+bot.action('multi_send', async (ctx) => {
+  const userId = ctx.from.id;
+  const session = sessions[userId] || {};
+  
+  // Reinitialize session but preserve wallet & balance
+  sessions[userId] = {
+    ...session,
+    step: 'await_multi_addresses',
+    sendType: 'multi'
+  };
+
+  await ctx.editMessageText(
+    `✉️ <b>Multi Send</b>\n\n` +
+    `Enter recipient addresses separated by commas or new lines:\n\n` +
+    `Example:\n` +
+    `<code>octAddress1, octAddress2, octAddress3</code>\n\n` +
+    `The total amount you specify will be equally distributed to all addresses.`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('🚫 Cancel', 'cancel_tx')]
+      ])
+    }
+  );
+});
+
+
 // Transaction amount step
 bot.on('text', async (ctx) => {
   const userId = ctx.from.id;
@@ -329,25 +376,90 @@ bot.on('text', async (ctx) => {
 
   if (!session) return;
 
-  if (session.step === 'await_address') {
-  if (!ctx.message.text.startsWith('oct')) {
-    return ctx.reply('❌ Invalid Octra address format. Must start with "oct"');
+    if (session.step === 'await_address') {
+    // Your existing single send address handling
+    if (!ctx.message.text.startsWith('oct')) {
+      return ctx.reply('❌ Invalid Octra address format. Must start with "oct"');
+    }
+
+    session.recipient = ctx.message.text;
+    session.step = 'await_amount';
+
+    // Use stored balance
+    const balance = session.balance || 0;
+
+    await ctx.replyWithHTML(
+      `💵 Enter amount to send (Your balance: ${balance} OCT)`,
+      Markup.inlineKeyboard([
+        [Markup.button.callback('🚫 Cancel', 'cancel_tx')]
+      ])
+    );
+    await ctx.deleteMessage();
   }
+  else if (session.step === 'await_multi_addresses') {
+    // Handle multi-send address input
+    const addresses = ctx.message.text.split(/[\n,]+/).map(addr => addr.trim()).filter(addr => addr.startsWith('oct'));
+    
+    if (addresses.length < 2) {
+      return ctx.reply('❌ Please enter at least 2 valid Octra addresses separated by commas or new lines');
+    }
 
-  session.recipient = ctx.message.text;
-  session.step = 'await_amount';
+    session.recipients = addresses;
+    session.step = 'await_multi_amount';
 
-  // Use stored balance
-  const balance = session.balance || 0;
+    // Use stored balance
+    const balance = session.balance || 0;
 
-  await ctx.replyWithHTML(
-    `💵 Enter amount to send (Your balance: ${balance} OCT)`,
-    Markup.inlineKeyboard([
-      [Markup.button.callback('🚫 Cancel', 'cancel_tx')]
-    ])
-  );
-  await ctx.deleteMessage();
-}
+    await ctx.replyWithHTML(
+      `💵 Enter TOTAL amount to distribute (Your balance: ${balance} OCT)\n\n` +
+      `This amount will be divided equally among ${addresses.length} addresses.`,
+      Markup.inlineKeyboard([
+        [Markup.button.callback('🚫 Cancel', 'cancel_tx')]
+      ])
+    );
+    await ctx.deleteMessage();
+  }
+  else if (session.step === 'await_multi_amount') {
+    const totalAmount = parseFloat(ctx.message.text);
+    const recipients = session.recipients || [];
+    const perRecipientAmount = totalAmount / recipients.length;
+
+    if (isNaN(totalAmount) || totalAmount <= 0) {
+      return ctx.reply('❌ Please enter a valid positive number');
+    }
+
+    // Use stored balance instead of fetching again
+    const balance = session.balance || 0;
+
+    if (totalAmount > balance) {
+      return ctx.reply(`❌ Insufficient balance. Your balance: ${balance} OCT`);
+    }
+
+    session.totalAmount = totalAmount;
+    session.perRecipientAmount = perRecipientAmount;
+    session.step = 'confirm_multi';
+
+    let recipientsList = recipients.slice(0, 5).map(addr => `<code>${addr}</code>`).join('\n');
+    if (recipients.length > 5) {
+      recipientsList += `\n...and ${recipients.length - 5} more`;
+    }
+
+    await ctx.replyWithHTML(
+      `🔍 <b>Confirm Multi-Send Transaction</b>\n\n` +
+      `Recipients (${recipients.length}):\n${recipientsList}\n\n` +
+      `Total amount: <b>${totalAmount} OCT</b>\n` +
+      `Each recipient gets: <b>${perRecipientAmount.toFixed(6)} OCT</b>\n\n` +
+      `Network fee: ${(0.001 * recipients.length).toFixed(3)} OCT (0.001 OCT per transaction)`,
+      Markup.inlineKeyboard([
+        [
+          Markup.button.callback('✅ Confirm', 'confirm_multi_tx'),
+          Markup.button.callback('🚫 Cancel', 'cancel_tx')
+        ]
+      ])
+    );
+
+    await ctx.deleteMessage();
+  }
 
 else if (session.step === 'await_private_key') {
   const privateKey = ctx.message.text.trim();
@@ -406,6 +518,127 @@ else if (session.step === 'await_private_key') {
   await ctx.deleteMessage();
 }
 });
+
+// Confirm multi-send transaction with delay between sends
+bot.action('confirm_multi_tx', async (ctx) => {
+  const userId = ctx.from.id;
+  const session = sessions[userId];
+  const senderUsername = ctx.from.username || ctx.from.first_name;
+
+  if (!session || session.step !== 'confirm_multi') return;
+
+  await ctx.editMessageText(
+    `⏳ Processing your multi-send transaction (${session.recipients.length} recipients)...`,
+    Markup.inlineKeyboard([])
+  );
+
+  // Add delay function
+  const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+  try {
+    const results = [];
+    let processedCount = 0;
+    
+    // Process each transaction with delay
+    for (const recipient of session.recipients) {
+      processedCount++;
+      
+      // Update progress message
+      await ctx.editMessageText(
+        `⏳ Processing ${processedCount}/${session.recipients.length}\n` +
+        `Sending to: <code>${recipient.substring(0, 10)}...</code>`,
+        { parse_mode: 'HTML' }
+      );
+
+      const txResult = await callAPI('/send-tx', 'post', {
+        userId,
+        recipient,
+        amount: session.perRecipientAmount
+      });
+      
+      results.push({
+        recipient,
+        success: txResult?.success,
+        txHash: txResult?.txHash,
+        error: txResult?.error
+      });
+
+      // Notify recipient if we have their user ID
+      const allWallets = await callAPI('/wallets');
+      const recipientWallet = allWallets?.wallets?.find(w => w.address === recipient);
+      
+      if (recipientWallet?.userId) {    
+        await bot.telegram.sendMessage(    
+          recipientWallet.userId,    
+          `✅ You just received <b>${session.perRecipientAmount.toFixed(6)} OCT</b>\nFrom: ${senderUsername ? '@' + senderUsername : 'a user'}`,    
+          { parse_mode: 'HTML' }    
+        ).catch(console.error);    
+      }
+
+      // Add delay between transactions (1.5 seconds)
+      if (processedCount < session.recipients.length) {
+        await delay(1500);
+      }
+    }
+
+    // Rest of the success/failure handling remains the same...
+    const failed = results.filter(r => !r.success);
+    const successCount = results.length - failed.length;
+
+    if (failed.length > 0) {
+      let message = `⚠️ <b>Multi-Send Partially Completed</b>\n\n` +
+                   `Successfully sent to ${successCount}/${session.recipients.length} recipients.\n\n`;
+      
+      if (successCount > 0) {
+        message += `✅ <b>Successful transactions:</b>\n`;
+        message += results.filter(r => r.success).slice(0, 3).map(r => 
+          `<code>${r.recipient.substring(0, 10)}...</code>: ${session.perRecipientAmount.toFixed(6)} OCT`
+        ).join('\n');
+        if (successCount > 3) message += `\n...and ${successCount - 3} more`;
+      }
+      
+      message += `\n\n❌ <b>Failed transactions:</b>\n`;
+      message += failed.slice(0, 3).map(r => 
+        `<code>${r.recipient.substring(0, 10)}...</code>: ${r.error || 'Unknown error'}`
+      ).join('\n');
+      if (failed.length > 3) message += `\n...and ${failed.length - 3} more`;
+      
+      message += `\n\nPlease try again with the failed addresses.`;
+      
+      await ctx.editMessageText(message, {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🏠 Main Menu', 'main_menu')]
+        ])
+      });
+    } else {
+      await ctx.editMessageText(
+        `✅ <b>Multi-Send Completed Successfully!</b>\n\n` +
+        `Recipients: <b>${session.recipients.length}</b>\n` +
+        `Total sent: <b>${session.totalAmount} OCT</b>\n` +
+        `Each received: <b>${session.perRecipientAmount.toFixed(6)} OCT</b>\n\n` +
+        `Un-official❕ https://t.me/octra_bot`,
+        {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('🏠 Main Menu', 'main_menu')]
+          ])
+        }
+      );
+    }
+  } catch (error) {
+    await ctx.editMessageText(
+      `❌ Multi-send failed!\n\n` +
+      `Error: ${error.message || 'Unknown error'}`,
+      Markup.inlineKeyboard([
+        [Markup.button.callback('🏠 Main Menu', 'main_menu')]
+      ])
+    );
+  }
+
+  delete sessions[userId];
+});
+
 // Confirm transaction
 bot.action('confirm_tx', async (ctx) => {
   const userId = ctx.from.id;
