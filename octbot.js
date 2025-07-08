@@ -50,9 +50,17 @@ async function getServerWithSpeed(userId) {
     const results = await Promise.all(
       SERVERS.map(async (url) => {
         try {
+          // 👇 Wake the server by pinging its root (no endpoint)
+          await axios.get(url).catch(() => {}); // Ignore any error, server might be asleep
+
+          // Optional small delay to give time to wake up (Render delay)
+          await new Promise(res => setTimeout(res, 1500)); 
+
+          // Now test speed with actual /server-status
           const start = Date.now();
-          await axios.get(`${url}/server-status`, { timeout: 20000 });
+          await axios.get(`${url}/server-status`, { timeout: 10000 });
           const speed = Math.min(100, Math.round(1000 / (Date.now() - start)));
+
           return { url, speed };
         } catch {
           return { url, speed: 0 };
@@ -70,11 +78,10 @@ async function getServerWithSpeed(userId) {
     return {
       url: SERVERS[0],
       name: SERVER_NAMES[SERVERS[0]] || "Default",
-      speed: 50 // Fallback speed
+      speed: 50 // fallback
     };
   }
 }
-
 // Modified callAPI to use user's selected server
 async function callAPI(endpoint, method = 'get', data = {}, userId = null) {
   try {
