@@ -387,10 +387,6 @@ else if (session.step === 'await_private_key') {
   // Use stored balance instead of fetching again
   const balance = session.balance || 0;
 
-  if (amount > balance) {
-    return ctx.reply(`❌ Insufficient balance (You have ${balance} OCT)`);
-  }
-
   session.amount = amount;
   session.step = 'confirm';
 
