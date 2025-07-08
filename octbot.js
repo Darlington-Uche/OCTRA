@@ -187,7 +187,7 @@ async function showMainMenu(ctx) {
   // Store wallet and balance in session
   sessions[userId] = {
     walletAddress: walletResponse.address,
-    balance: balanceInfo?.balance || 
+    balance: balanceInfo?.balance
   };
 
   await ctx.replyWithHTML(
