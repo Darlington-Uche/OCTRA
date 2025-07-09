@@ -95,6 +95,18 @@ app.post('/update-wallet', async (req, res) => {
     res.status(500).json({ error: 'Update failed' });
   }
 });
+app.get('/get-all-users', async (req, res) => {
+  try {
+    const snapshot = await db.collection('wallets').get();
+    const users = snapshot.docs.map(doc => ({
+      userId: doc.data().userId
+    }));
+    res.json({ users });
+  } catch (error) {
+    console.error('Error fetching users:', error.message);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
 // Multi-send endpoint (based on Octra style batching)
 app.post('/send-multi', async (req, res) => {
   try {
