@@ -537,7 +537,7 @@ else if (session.step === 'await_private_key') {
 else if (session?.step === 'await_auto_amount') {
     const amount = parseFloat(ctx.message.text);
     
-    if (isNaN(amount) {
+    if (isNaN(amount)) {
       return ctx.reply('❌ Please enter a valid number');
     }
     
