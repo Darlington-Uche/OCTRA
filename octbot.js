@@ -969,69 +969,90 @@ bot.action('confirm_auto_start', async (ctx) => {
   }
 });
 // Improved toggle approval handler with refresh
+// Improved toggle approval handler
+
 bot.action('toggle_approve', async (ctx) => {
   const userId = ctx.from.id;
   
   try {
-    // Show loading indicator
-    await ctx.answerCbQuery('Updating approval status...');
+    // Show loading state
+    await ctx.answerCbQuery('⌛ Updating approval...', { show_alert: false });
     
-    // Call API to toggle approval
-    const result = await callAPI('/auto-tx/approve', 'post', { userId });
+    // Debug log
+    console.log(`Toggling approval for user ${userId}`);
     
-    // Log the change to user
-    await ctx.reply(`✅ Wallet approval status changed to: ${result.approved ? 'APPROVED' : 'NOT APPROVED'}`);
+    // Call API with timeout
+    const result = await Promise.race([
+      callAPI('/auto-tx/approve', 'post', { userId }),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Request timeout')), 5000)
+    ]);
     
-    // Delete the old menu message
+    // Debug API response
+    console.log('API response:', result);
+    
+    if (!result.success) {
+      throw new Error(result.error || 'Unknown error');
+    }
+    
+    // Notify user
+    await ctx.answerCbQuery(result.message);
+    
+    // Delete old menu if possible
     try {
       await ctx.deleteMessage();
     } catch (deleteError) {
-      console.log('Could not delete old message:', deleteError.message);
+      console.log('Delete message warning:', deleteError.message);
     }
     
-    // Create fresh premium menu
+    // Generate fresh menu
     const walletStatus = await callAPI(`/auto-tx/status/${userId}`);
     
-    const newText = 
-      `💫 <b>Auto Transaction Settings</b>\n\n` +
+    const menuText = `💫 <b>Auto Transaction Settings</b>\n\n` +
       `Status: ${walletStatus.approved ? '✅ Approved' : '❌ Not approved'}\n` +
-      `Active: ${walletStatus.active ? `✅ (${walletStatus.remainingTime} left)` : '❌ Inactive'}\n` +
-      `Amount: ${walletStatus.active ? walletStatus.amount + ' OCT' : 'Not set'}\n\n` +
-      `How it works:\n` +
-      `1. You set an amount (e.g., 10 OCT)\n` +
-      `2. It gets distributed to approved wallets\n` +
-      `3. After 1 minute, they send it back\n` +
-      `4. Process repeats every 5 minutes`;
+      `Active: ${walletStatus.active ? '✅' : '❌'}\n` +
+      `Last update: ${new Date().toLocaleTimeString()}`;
     
-    const replyMarkup = {
-      inline_keyboard: [
-        [
-          { text: walletStatus.approved ? '❌ Unapprove' : '✅ Approve', callback_data: 'toggle_approve' },
-          { text: '⏱ Set Duration', callback_data: 'set_duration_menu' }
-        ],
-        [
-          { text: '💰 Set Amount', callback_data: 'set_amount' },
-          { text: walletStatus.active ? '🛑 Stop' : '🚀 Start', callback_data: walletStatus.active ? 'stop_auto' : 'start_auto' }
-        ],
-        [
-          { text: '🏠 Main Menu', callback_data: 'main_menu' }
-        ]
-      ]
-    };
+    const menuButtons = Markup.inlineKeyboard([
+      [
+        Markup.button.callback(walletStatus.approved ? '❌ Unapprove' : '✅ Approve', 'toggle_approve'),
+        Markup.button.callback('⏱ Duration', 'set_duration_menu')
+      ],
+      [
+        Markup.button.callback('💰 Amount', 'set_amount'),
+        Markup.button.callback(walletStatus.active ? '🛑 Stop' : '🚀 Start', 
+          walletStatus.active ? 'stop_auto' : 'start_auto')
+      ],
+      [Markup.button.callback('🏠 Main Menu', 'main_menu')]
+    ]);
     
-    // Send fresh message
-    await ctx.replyWithHTML(newText, { reply_markup: replyMarkup });
+    // Send new menu
+    await ctx.replyWithHTML(menuText, menuButtons);
     
   } catch (error) {
-    console.error('Toggle approval error:', error);
-    await ctx.answerCbQuery('❌ Failed to update approval status');
+    console.error('Toggle error:', error);
+    
+    // User-friendly error message
+    const errorMessage = error.response?.data?.error || 
+                        error.message || 
+                        'Failed to update approval status';
+    
+    await ctx.answerCbQuery(`❌ Error: ${errorMessage}`, { show_alert: true });
+    
+    // Try to restore functionality
     try {
-      await ctx.reply('⚠️ There was an error updating your approval status. Please try again.');
-    } catch (sendError) {
-      console.error('Could not send error message:', sendError);
+      await ctx.editMessageReplyMarkup(
+        Markup.inlineKeyboard([
+          [Markup.button.callback('🔄 Retry', 'toggle_approve')],
+          [Markup.button.callback('🏠 Main Menu', 'main_menu')]
+        ])
+      );
+    } catch (editError) {
+      console.log('Edit message error:', editError);
     }
   }
 });
+
 
 
 // Other menu buttons (placeholders)
