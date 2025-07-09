@@ -951,6 +951,31 @@ bot.action('confirm_auto_start', async (ctx) => {
     ctx.answerCbQuery('❌ Failed to start auto transactions');
   }
 });
+// Toggle Approval
+bot.action('toggle_approve', async (ctx) => {
+  const userId = ctx.from.id;
+  
+  try {
+    const result = await callAPI('/auto-tx/approve', 'post', { userId });
+    ctx.answerCbQuery(result.message);
+    return ctx.editMessageReplyMarkup(
+      Markup.inlineKeyboard([
+        [
+          Markup.button.callback(result.approved ? '❌ Unapprove' : '✅ Approve', 'toggle_approve'),
+          Markup.button.callback('⏱ Set Duration', 'set_duration_menu')
+        ],
+        [
+          Markup.button.callback(result.active ? '🛑 Stop Auto' : '🚀 Start Auto', 
+            result.active ? 'stop_auto' : 'start_auto')
+        ],
+        [Markup.button.callback('🏠 Main Menu', 'main_menu')]
+      ])
+    );
+  } catch (error) {
+    ctx.answerCbQuery('❌ Approval update failed');
+  }
+});
+
 
 // Other menu buttons (placeholders)
 bot.action(['x', 'support'], async (ctx) => {
