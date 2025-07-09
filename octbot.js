@@ -520,6 +520,7 @@ else if (session.step === 'await_private_key') {
 });
 
 // Confirm multi-send transaction with delay between sends
+// Confirm multi-send transaction with backend batching
 bot.action('confirm_multi_tx', async (ctx) => {
   const userId = ctx.from.id;
   const session = sessions[userId];
@@ -528,83 +529,50 @@ bot.action('confirm_multi_tx', async (ctx) => {
   if (!session || session.step !== 'confirm_multi') return;
 
   await ctx.editMessageText(
-    `⏳ Processing your multi-send transaction (${session.recipients.length} recipients)...`,
-    Markup.inlineKeyboard([])
+    `⏳ Sending <b>${session.totalAmount} OCT</b> to <b>${session.recipients.length}</b> recipients...`,
+    { parse_mode: 'HTML' }
   );
 
-  // Add delay function
-  const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-
   try {
-    const results = [];
-    let processedCount = 0;
-    
-    // Process each transaction with delay
-    for (const recipient of session.recipients) {
-      processedCount++;
-      
-      // Update progress message
-      await ctx.editMessageText(
-        `⏳ Processing ${processedCount}/${session.recipients.length}\n` +
-        `Sending to: <code>${recipient.substring(0, 10)}...</code>`,
-        { parse_mode: 'HTML' }
-      );
+    // Prepare recipient array for backend
+    const recipientList = session.recipients.map(address => ({
+      address,
+      amount: session.perRecipientAmount
+    }));
 
-      const txResult = await callAPI('/send-tx', 'post', {
-        userId,
-        recipient,
-        amount: session.perRecipientAmount
-      });
-      
-      results.push({
-        recipient,
-        success: txResult?.success,
-        txHash: txResult?.txHash,
-        error: txResult?.error
-      });
+    const response = await callAPI('/send-multi', 'post', {
+      userId,
+      recipients: recipientList
+    });
 
-      // Notify recipient if we have their user ID
-      const allWallets = await callAPI('/wallets');
-      const recipientWallet = allWallets?.wallets?.find(w => w.address === recipient);
-      
-      if (recipientWallet?.userId) {    
-        await bot.telegram.sendMessage(    
-          recipientWallet.userId,    
-          `✅ You just received <b>${session.perRecipientAmount.toFixed(6)} OCT</b>\nFrom: ${senderUsername ? '@' + senderUsername : 'a user'}`,    
-          { parse_mode: 'HTML' }    
-        ).catch(console.error);    
-      }
+    const results = response?.results || [];
+    const successList = results.filter(r => r.success);
+    const failList = results.filter(r => !r.success);
 
-      // Add delay between transactions (1.5 seconds)
-      if (processedCount < session.recipients.length) {
-        await delay(45000);
+    // Notify each successful recipient if userId is known
+    const allWallets = await callAPI('/wallets');
+    for (const result of successList) {
+      const recipientWallet = allWallets?.wallets?.find(w => w.address === result.recipient);
+      if (recipientWallet?.userId) {
+        await bot.telegram.sendMessage(
+          recipientWallet.userId,
+          `✅ You just received <b>${session.perRecipientAmount.toFixed(6)} OCT</b>\nFrom: ${senderUsername ? '@' + senderUsername : 'a user'}`,
+          { parse_mode: 'HTML' }
+        ).catch(console.error);
       }
     }
 
-    // Rest of the success/failure handling remains the same...
-    const failed = results.filter(r => !r.success);
-    const successCount = results.length - failed.length;
-
-    if (failed.length > 0) {
+    // Construct final message
+    if (failList.length > 0) {
       let message = `⚠️ <b>Multi-Send Partially Completed</b>\n\n` +
-                   `Successfully sent to ${successCount}/${session.recipients.length} recipients.\n\n`;
-      
-      if (successCount > 0) {
-        message += `✅ <b>Successful transactions:</b>\n`;
-        message += results.filter(r => r.success).slice(0, 3).map(r => 
-          `<code>${r.recipient.substring(0, 10)}...</code>: ${session.perRecipientAmount.toFixed(6)} OCT`
-        ).join('\n');
-        if (successCount > 3) message += `\n...and ${successCount - 3} more`;
-      }
-      
-      message += `\n\n❌ <b>Failed transactions:</b>\n`;
-      message += failed.slice(0, 3).map(r => 
+                    `✅ Successful: ${successList.length}\n❌ Failed: ${failList.length}\n\n`;
+      message += `Failed Recipients:\n`;
+      message += failList.slice(0, 3).map(r =>
         `<code>${r.recipient.substring(0, 10)}...</code>: ${r.error || 'Unknown error'}`
       ).join('\n');
-      if (failed.length > 3) message += `\n...and ${failed.length - 3} more`;
-      
-      message += `\n\nPlease try again with the failed addresses.`;
-      
+      if (failList.length > 3) message += `\n...and ${failList.length - 3} more`;
+      message += `\n\nPlease retry with the failed addresses.`;
+
       await ctx.editMessageText(message, {
         parse_mode: 'HTML',
         ...Markup.inlineKeyboard([
@@ -626,13 +594,15 @@ bot.action('confirm_multi_tx', async (ctx) => {
         }
       );
     }
+
   } catch (error) {
     await ctx.editMessageText(
-      `❌ Multi-send failed!\n\n` +
-      `Error: ${error.message || 'Unknown error'}`,
-      Markup.inlineKeyboard([
-        [Markup.button.callback('🏠 Main Menu', 'main_menu')]
-      ])
+      `❌ Multi-send failed!\n\nError: ${error.message || 'Unknown error'}`,
+      {
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🏠 Main Menu', 'main_menu')]
+        ])
+      }
     );
   }
 
