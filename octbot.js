@@ -839,13 +839,15 @@ bot.action('tx_history', async (ctx) => {
   }
 });
 // Auto Transaction Menu
+// Modified premium menu handler with content change detection
 bot.action('premium', async (ctx) => {
   const userId = ctx.from.id;
   
   try {
     const walletStatus = await callAPI(`/auto-tx/status/${userId}`);
     
-    await ctx.editMessageText(
+    // Generate new message content
+    const newText = 
       `💫 <b>Auto Transaction Settings</b>\n\n` +
       `Status: ${walletStatus.approved ? '✅ Approved' : '❌ Not approved'}\n` +
       `Active: ${walletStatus.active ? `✅ (${walletStatus.remainingTime} left)` : '❌ Inactive'}\n` +
@@ -854,26 +856,40 @@ bot.action('premium', async (ctx) => {
       `1. You set an amount (e.g., 10 OCT)\n` +
       `2. It gets distributed to approved wallets\n` +
       `3. After 1 minute, they send it back\n` +
-      `4. Process repeats every 5 minutes`,
-      {
+      `4. Process repeats every 5 minutes`;
+    
+    // Generate new markup
+    const newMarkup = Markup.inlineKeyboard([
+      [
+        Markup.button.callback(walletStatus.approved ? '❌ Unapprove' : '✅ Approve', 'toggle_approve'),
+        Markup.button.callback('⏱ Set Duration', 'set_duration_menu')
+      ],
+      [
+        Markup.button.callback('💰 Set Amount', 'set_amount'),
+        Markup.button.callback(walletStatus.active ? '🛑 Stop' : '🚀 Start', 
+          walletStatus.active ? 'stop_auto' : 'start_auto')
+      ],
+      [Markup.button.callback('🏠 Main Menu', 'main_menu')]
+    ]);
+    
+    // Only edit if content or markup changed
+    try {
+      await ctx.editMessageText(newText, {
         parse_mode: 'HTML',
-        ...Markup.inlineKeyboard([
-          [
-            Markup.button.callback(walletStatus.approved ? '❌ Unapprove' : '✅ Approve', 'toggle_approve'),
-            Markup.button.callback('⏱ Set Duration', 'set_duration_menu')
-          ],
-          [
-            Markup.button.callback('💰 Set Amount', 'set_amount'),
-            Markup.button.callback(walletStatus.active ? '🛑 Stop' : '🚀 Start', 
-              walletStatus.active ? 'stop_auto' : 'start_auto')
-          ],
-          [Markup.button.callback('🏠 Main Menu', 'main_menu')]
-        ])
+        reply_markup: newMarkup
+      });
+    } catch (editError) {
+      if (!editError.message.includes('message is not modified')) {
+        throw editError;
       }
-    );
+      // Silently handle "not modified" errors
+    }
+    
   } catch (error) {
     console.error('Premium menu error:', error);
-    ctx.answerCbQuery('❌ Error loading settings');
+    if (!error.message.includes('message is not modified')) {
+      await ctx.answerCbQuery('❌ Error loading settings');
+    }
   }
 });
 
