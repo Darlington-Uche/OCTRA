@@ -69,6 +69,101 @@ app.get('/server-status', (req, res) => {
   });
 });
 //
+// Multi-send endpoint (based)
+app.post('/send-multi', async (req, res) => {
+  try {
+    const { userId, recipients } = req.body; // recipients: [{ address, amount }]
+
+    if (!userId || !Array.isArray(recipients) || recipients.length === 0) {
+      return res.status(400).json({ error: 'Missing or invalid recipients array' });
+    }
+
+    // Fetch wallet
+    const doc = await db.collection('wallets').doc(String(userId)).get();
+    if (!doc.exists) return res.status(404).json({ error: 'Wallet not found' });
+
+    const wallet = doc.data();
+    const privateKey = Buffer.from(wallet.privateKey, 'hex');
+    const signingKey = nacl.sign.keyPair.fromSeed(privateKey.slice(0, 32));
+
+    // Get current nonce
+    let baseNonce = 0;
+    try {
+      const resNonce = await axios.get(`${RPC_ENDPOINT}/balance/${wallet.address}`);
+      baseNonce = resNonce.data.nonce || 0;
+    } catch (err) {
+      return res.status(500).json({ error: 'Failed to get nonce', details: err.message });
+    }
+
+    // Build transactions
+    const txResults = [];
+    for (let i = 0; i < recipients.length; i++) {
+      const { address, amount } = recipients[i];
+      const txNonce = baseNonce + 1 + i;
+
+      const tx = {
+        from: wallet.address,
+        to_: address,
+        amount: Math.round(amount * 1e6).toString(),
+        nonce: txNonce,
+        ou: amount < 1000 ? "1" : "3",
+        timestamp: Date.now() / 1000 + Math.random() * 0.01
+      };
+
+      const txForSigning = JSON.stringify(
+        Object.fromEntries(Object.entries(tx).filter(([k]) => k !== 'message'))
+      );
+
+      const signature = nacl.sign.detached(Buffer.from(txForSigning), signingKey.secretKey);
+
+      const signedTx = {
+        ...tx,
+        signature: Buffer.from(signature).toString('base64'),
+        public_key: Buffer.from(signingKey.publicKey).toString('base64')
+      };
+
+      try {
+        const resTx = await axios.post(`${RPC_ENDPOINT}/send-tx`, signedTx);
+        if (resTx.data.status === 'accepted') {
+          await db.collection('transactions').add({
+            userId,
+            txHash: resTx.data.tx_hash,
+            from: wallet.address,
+            to: address,
+            amount,
+            nonce: txNonce,
+            timestamp: admin.firestore.FieldValue.serverTimestamp(),
+            status: 'pending'
+          });
+
+          txResults.push({ success: true, txHash: resTx.data.tx_hash, recipient: address });
+        } else {
+          txResults.push({ success: false, error: resTx.data, recipient: address });
+        }
+      } catch (err) {
+        txResults.push({ success: false, error: err.message, recipient: address });
+      }
+
+      // Optional short delay to reduce node overload
+      await new Promise(res => setTimeout(res, 300));
+    }
+
+    const failed = txResults.filter(r => !r.success);
+    const successful = txResults.filter(r => r.success);
+
+    res.json({
+      successCount: successful.length,
+      failedCount: failed.length,
+      results: txResults
+    });
+
+  } catch (err) {
+    console.error('Multi-send error:', err);
+    res.status(500).json({ error: 'Server error', details: err.message });
+  }
+});
+
+
 app.get('/wallets', async (req, res) => {
   try {
     const snapshot = await db.collection('wallets').get();
