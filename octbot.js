@@ -805,9 +805,145 @@ bot.action('tx_history', async (ctx) => {
     await ctx.reply('❌ Failed to load transactions. Please try again later.');
   }
 });
+// Auto Transaction Menu
+bot.action('premium', async (ctx) => {
+  const userId = ctx.from.id;
+  
+  try {
+    const walletStatus = await callAPI(`/auto-tx/status/${userId}`);
+    
+    await ctx.editMessageText(
+      `💫 <b>Auto Transaction Settings</b>\n\n` +
+      `Status: ${walletStatus.approved ? '✅ Approved' : '❌ Not approved'}\n` +
+      `Active: ${walletStatus.active ? `✅ (${walletStatus.remainingTime} left)` : '❌ Inactive'}\n` +
+      `Amount: ${walletStatus.active ? walletStatus.amount + ' OCT' : 'Not set'}\n\n` +
+      `How it works:\n` +
+      `1. You set an amount (e.g., 10 OCT)\n` +
+      `2. It gets distributed to approved wallets\n` +
+      `3. After 1 minute, they send it back\n` +
+      `4. Process repeats every 5 minutes`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [
+            Markup.button.callback(walletStatus.approved ? '❌ Unapprove' : '✅ Approve', 'toggle_approve'),
+            Markup.button.callback('⏱ Set Duration', 'set_duration_menu')
+          ],
+          [
+            Markup.button.callback('💰 Set Amount', 'set_amount'),
+            Markup.button.callback(walletStatus.active ? '🛑 Stop' : '🚀 Start', 
+              walletStatus.active ? 'stop_auto' : 'start_auto')
+          ],
+          [Markup.button.callback('🏠 Main Menu', 'main_menu')]
+        ])
+      }
+    );
+  } catch (error) {
+    console.error('Premium menu error:', error);
+    ctx.answerCbQuery('❌ Error loading settings');
+  }
+});
+
+// Set Amount Handler
+bot.action('set_amount', async (ctx) => {
+  const userId = ctx.from.id;
+  sessions[userId] = { ...sessions[userId], step: 'await_auto_amount' };
+  
+  await ctx.editMessageText(
+    `💰 <b>Set Auto Transaction Amount</b>\n\n` +
+    `Enter the total amount (in OCT) to use for each cycle:\n\n` +
+    `Example: 10 (will distribute ~9.5 OCT after fees)\n` +
+    `Minimum: 1 OCT`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('🔙 Back', 'premium')]
+      ])
+    }
+  );
+});
+
+// Handle Amount Input
+bot.on('text', async (ctx) => {
+  const userId = ctx.from.id;
+  const session = sessions[userId];
+  
+  if (session?.step === 'await_auto_amount') {
+    const amount = parseFloat(ctx.message.text);
+    
+    if (isNaN(amount) {
+      return ctx.reply('❌ Please enter a valid number');
+    }
+    
+    if (amount < 1) {
+      return ctx.reply('❌ Minimum amount is 1 OCT');
+    }
+    
+    // Store amount in session for confirmation
+    session.autoAmount = amount;
+    session.step = 'confirm_auto_amount';
+    
+    await ctx.replyWithHTML(
+      `🔍 <b>Confirm Auto Transaction Amount</b>\n\n` +
+      `Amount: <b>${amount} OCT</b> per cycle\n\n` +
+      `This amount will be:\n` +
+      `1. Distributed to approved wallets\n` +
+      `2. Returned to you after 1 minute\n` +
+      `3. Repeated every 5 minutes`,
+      Markup.inlineKeyboard([
+        [
+          Markup.button.callback('✅ Confirm', 'confirm_auto_start'),
+          Markup.button.callback('🚫 Cancel', 'premium')
+        ]
+      ])
+    );
+    
+    await ctx.deleteMessage();
+  }
+});
+
+// Confirm and Start Auto Transactions
+bot.action('confirm_auto_start', async (ctx) => {
+  const userId = ctx.from.id;
+  const session = sessions[userId];
+  
+  if (!session?.autoAmount) {
+    return ctx.answerCbQuery('❌ No amount set');
+  }
+  
+  try {
+    const result = await callAPI('/auto-tx/start', 'post', { 
+      userId, 
+      amount: session.autoAmount 
+    });
+    
+    if (result.success) {
+      await ctx.editMessageText(
+        `🚀 <b>Auto Transactions Started!</b>\n\n` +
+        `Amount: ${session.autoAmount} OCT per cycle\n` +
+        `Process:\n` +
+        `1. Distributed to approved wallets\n` +
+        `2. Returns after 1 minute\n` +
+        `3. Repeats every 5 minutes\n\n` +
+        `You can stop anytime from the premium menu.`,
+        {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('🛑 Stop Auto', 'stop_auto')],
+            [Markup.button.callback('🏠 Main Menu', 'main_menu')]
+          ])
+        }
+      );
+    } else {
+      ctx.answerCbQuery(`❌ Error: ${result.message}`);
+    }
+  } catch (error) {
+    ctx.answerCbQuery('❌ Failed to start auto transactions');
+  }
+});
 
 // Other menu buttons (placeholders)
-bot.action(['x', 'support', 'premium'], async (ctx) => {
+bot.action(['x', 'support'], async (ctx) => {
   await ctx.answerCbQuery('🚧 Feature coming soon!');
 });
 
