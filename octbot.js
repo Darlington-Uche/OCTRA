@@ -195,7 +195,7 @@ bot.command('announcement', async (ctx) => {
 
   try {
     // 🔁 Fetch all wallet users from your backend
-    const res = await axios.get(`${process.env.BACKEND}/get-all-users`);
+    const res = await callAPI(`/get-all-users`);
     const users = res.data.users || [];
 
     if (users.length === 0) {
