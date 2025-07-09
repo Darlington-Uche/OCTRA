@@ -840,6 +840,7 @@ bot.action('tx_history', async (ctx) => {
 });
 // Auto Transaction Menu
 // Modified premium menu handler with content change detection
+// Corrected premium menu handler with proper button display
 bot.action('premium', async (ctx) => {
   const userId = ctx.from.id;
   
@@ -858,25 +859,42 @@ bot.action('premium', async (ctx) => {
       `3. After 1 minute, they send it back\n` +
       `4. Process repeats every 5 minutes`;
     
-    // Generate new markup
-    const newMarkup = Markup.inlineKeyboard([
-      [
-        Markup.button.callback(walletStatus.approved ? '❌ Unapprove' : '✅ Approve', 'toggle_approve'),
-        Markup.button.callback('⏱ Set Duration', 'set_duration_menu')
-      ],
-      [
-        Markup.button.callback('💰 Set Amount', 'set_amount'),
-        Markup.button.callback(walletStatus.active ? '🛑 Stop' : '🚀 Start', 
-          walletStatus.active ? 'stop_auto' : 'start_auto')
-      ],
-      [Markup.button.callback('🏠 Main Menu', 'main_menu')]
-    ]);
+    // Generate new markup - CORRECTED VERSION
+    const replyMarkup = {
+      inline_keyboard: [
+        [
+          { 
+            text: walletStatus.approved ? '❌ Unapprove' : '✅ Approve', 
+            callback_data: 'toggle_approve' 
+          },
+          { 
+            text: '⏱ Set Duration', 
+            callback_data: 'set_duration_menu' 
+          }
+        ],
+        [
+          { 
+            text: '💰 Set Amount', 
+            callback_data: 'set_amount' 
+          },
+          { 
+            text: walletStatus.active ? '🛑 Stop' : '🚀 Start',
+            callback_data: walletStatus.active ? 'stop_auto' : 'start_auto' 
+          }
+        ],
+        [
+          { 
+            text: '🏠 Main Menu', 
+            callback_data: 'main_menu' 
+          }
+        ]
+      ]
+    };
     
-    // Only edit if content or markup changed
     try {
       await ctx.editMessageText(newText, {
         parse_mode: 'HTML',
-        reply_markup: newMarkup
+        reply_markup: replyMarkup  // Using the properly formatted markup
       });
     } catch (editError) {
       if (!editError.message.includes('message is not modified')) {
@@ -892,7 +910,6 @@ bot.action('premium', async (ctx) => {
     }
   }
 });
-
 // Set Amount Handler
 bot.action('set_amount', async (ctx) => {
   const userId = ctx.from.id;
