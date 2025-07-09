@@ -566,6 +566,8 @@ app.get('/get-transactions/:address', async (req, res) => {
     });
   }
 });
+
+
 app.post('/switch-wallet', async (req, res) => {
   try {
     const { userId, privateKey } = req.body;
@@ -574,7 +576,7 @@ app.post('/switch-wallet', async (req, res) => {
       return res.status(400).json({ error: 'User ID and private key are required' });
     }
 
-    // Validate the private key format and extract the seed
+    // Validate and extract seed
     const seed = extractSeedFromPrivateKey(privateKey);
     if (!seed) {
       return res.status(400).json({ error: 'Invalid private key format' });
@@ -586,30 +588,19 @@ app.post('/switch-wallet', async (req, res) => {
     const addressHash = crypto.createHash('sha256').update(publicKey).digest();
     const address = 'oct' + bs58.encode(addressHash);
 
-    // Optional: Check wallet balance to verify it's valid
-    try {
-      const balanceResponse = await octraAPI.get(`/balance/${address}`);
-      if (balanceResponse.data.balance === undefined) {
-        return res.status(400).json({ error: 'Could not verify wallet balance' });
-      }
-    } catch (error) {
-      console.error('Balance check error:', error);
-      return res.status(400).json({ error: 'Failed to verify wallet' });
-    }
-
-    // Save to Firestore
-    const walletRef = db.collection('wallets').doc(String(userId));
+    // Store wallet
+    const walletRef = admin.firestore().collection('wallets').doc(String(userId));
     const walletData = {
       privateKey,
       publicKey: publicKey.toString('hex'),
       address,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      mnemonic: null // since it's imported from private key
+      mnemonic: null // since it's imported
     };
 
     await walletRef.set(walletData, { merge: true });
 
-    res.json({
+    return res.json({
       success: true,
       address,
       message: 'Wallet successfully switched'
@@ -617,7 +608,7 @@ app.post('/switch-wallet', async (req, res) => {
 
   } catch (error) {
     console.error('Switch wallet error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       error: 'Failed to switch wallet',
       details: error.message
     });
@@ -634,22 +625,21 @@ function extractSeedFromPrivateKey(privateKey) {
       // 64-char hex (32 bytes)
       seed = Buffer.from(privateKey, 'hex');
     } else if (/^[0-9a-fA-F]{128}$/.test(privateKey)) {
-      // 128-char hex (64 bytes) → take first 32 bytes
+      // 128-char hex (64 bytes) → use first 64 chars
       seed = Buffer.from(privateKey.slice(0, 64), 'hex');
     } else if (/^[A-Za-z0-9+/=]{44}$/.test(privateKey)) {
-      // Base64 encoded 32 bytes
+      // Base64 format (32 bytes)
       seed = Buffer.from(privateKey, 'base64');
     } else {
       return null;
     }
 
-    if (seed.length !== 32) return null;
-    return seed;
-
+    return seed.length === 32 ? seed : null;
   } catch (err) {
     return null;
   }
 }
+
 const PORT = process.env.PORT || 3000;
 
 // 🩺 Health Check Endpoint
