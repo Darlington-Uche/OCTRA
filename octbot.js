@@ -175,6 +175,52 @@ bot.command('keys', async (ctx) => {
     }
   }, 60000); // 60 seconds
 });
+const ADMIN_ID = '6963724844'; // 🔁 Replace this with your real Telegram ID
+
+bot.command('announcement', async (ctx) => {
+  const userId = String(ctx.from.id);
+
+  // ✅ Restrict access to only you (admin)
+  if (userId !== ADMIN_ID) {
+    return ctx.reply('❌ You are not authorized to use this command.');
+  }
+
+  // 📨 Extract the announcement message
+  const messageText = ctx.message.text;
+  const announcement = messageText.replace('/announcement', '').trim();
+
+  if (!announcement) {
+    return ctx.reply('⚠️ Usage:\n/announcement Your message to everyone');
+  }
+
+  try {
+    // 🔁 Fetch all wallet users from your backend
+    const res = await axios.get(`${process.env.BACKEND}/get-all-users`);
+    const users = res.data.users || [];
+
+    if (users.length === 0) {
+      return ctx.reply('⚠️ No users found.');
+    }
+
+    let success = 0, failed = 0;
+
+    // 🔁 Send announcement to all users
+    for (const user of users) {
+      try {
+        await bot.telegram.sendMessage(user.userId, `📢 Announcement:\n\n${announcement}`);
+        success++;
+      } catch (err) {
+        console.error(`❌ Failed for ${user.userId}:`, err.message);
+        failed++;
+      }
+    }
+
+    ctx.reply(`✅ Sent to ${success} users\n❌ Failed for ${failed} users`);
+  } catch (error) {
+    console.error('Announcement Error:', error.message);
+    ctx.reply('❌ Failed to send announcement.');
+  }
+});
 
 async function showMainMenu(ctx) {
   const userId = ctx.from.id;
