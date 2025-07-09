@@ -534,6 +534,39 @@ else if (session.step === 'await_private_key') {
   // Delete the private key message for security
   await ctx.deleteMessage();
 }
+else if (session?.step === 'await_auto_amount') {
+    const amount = parseFloat(ctx.message.text);
+    
+    if (isNaN(amount) {
+      return ctx.reply('❌ Please enter a valid number');
+    }
+    
+    if (amount < 1) {
+      return ctx.reply('❌ Minimum amount is 1 OCT');
+    }
+    
+    // Store amount in session for confirmation
+    session.autoAmount = amount;
+    session.step = 'confirm_auto_amount';
+    
+    await ctx.replyWithHTML(
+      `🔍 <b>Confirm Auto Transaction Amount</b>\n\n` +
+      `Amount: <b>${amount} OCT</b> per cycle\n\n` +
+      `This amount will be:\n` +
+      `1. Distributed to approved wallets\n` +
+      `2. Returned to you after 1 minute\n` +
+      `3. Repeated every 5 minutes`,
+      Markup.inlineKeyboard([
+        [
+          Markup.button.callback('✅ Confirm', 'confirm_auto_start'),
+          Markup.button.callback('🚫 Cancel', 'premium')
+        ]
+      ])
+    );
+    
+    await ctx.deleteMessage();
+  }
+
   else if (session.step === 'await_amount') {
   const amount = parseFloat(ctx.message.text);
 
@@ -861,45 +894,6 @@ bot.action('set_amount', async (ctx) => {
       ])
     }
   );
-});
-
-// Handle Amount Input
-bot.on('text', async (ctx) => {
-  const userId = ctx.from.id;
-  const session = sessions[userId];
-  
-  if (session?.step === 'await_auto_amount') {
-    const amount = parseFloat(ctx.message.text);
-    
-    if (isNaN(amount) {
-      return ctx.reply('❌ Please enter a valid number');
-    }
-    
-    if (amount < 1) {
-      return ctx.reply('❌ Minimum amount is 1 OCT');
-    }
-    
-    // Store amount in session for confirmation
-    session.autoAmount = amount;
-    session.step = 'confirm_auto_amount';
-    
-    await ctx.replyWithHTML(
-      `🔍 <b>Confirm Auto Transaction Amount</b>\n\n` +
-      `Amount: <b>${amount} OCT</b> per cycle\n\n` +
-      `This amount will be:\n` +
-      `1. Distributed to approved wallets\n` +
-      `2. Returned to you after 1 minute\n` +
-      `3. Repeated every 5 minutes`,
-      Markup.inlineKeyboard([
-        [
-          Markup.button.callback('✅ Confirm', 'confirm_auto_start'),
-          Markup.button.callback('🚫 Cancel', 'premium')
-        ]
-      ])
-    );
-    
-    await ctx.deleteMessage();
-  }
 });
 
 // Confirm and Start Auto Transactions
