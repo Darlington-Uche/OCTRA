@@ -81,6 +81,30 @@ app.get('/get-all-users', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch users' });
   }
 });
+
+// Stop Auto Transactions
+app.post('/auto-tx/stop', async (req, res) => {
+  try {
+    const { userId } = req.body;
+    const walletRef = db.collection('wallets').doc(String(userId));
+    
+    await walletRef.update({
+      autoActive: false,
+      autoStoppedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+    
+    res.json({
+      success: true,
+      message: 'Auto transactions stopped',
+      active: false
+    });
+    
+  } catch (error) {
+    console.error('Stop error:', error);
+    res.status(500).json({ error: 'Failed to stop auto transactions' });
+  }
+});
+
 // Add these endpoints to your existing server
 
 // Auto Transaction Status
