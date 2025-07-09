@@ -633,19 +633,27 @@ function extractSeedFromPrivateKey(privateKey) {
   try {
     if (typeof privateKey !== 'string') return null;
 
-    // Accept either 64-character or 128-character hex strings
-    if (!/^[0-9a-fA-F]{64}$/.test(privateKey) && !/^[0-9a-fA-F]{128}$/.test(privateKey)) {
-      return null;
+    let seed;
+
+    if (/^[0-9a-fA-F]{64}$/.test(privateKey)) {
+      // 32-byte hex
+      seed = Buffer.from(privateKey, 'hex');
+    } else if (/^[0-9a-fA-F]{128}$/.test(privateKey)) {
+      // 64-byte hex, use first 32 bytes
+      seed = Buffer.from(privateKey.slice(0, 64), 'hex');
+    } else {
+      // Try base64
+      const base64Decoded = Buffer.from(privateKey, 'base64');
+      if (base64Decoded.length === 32) {
+        seed = base64Decoded;
+      } else {
+        return null; // Invalid size
+      }
     }
 
-    const hex = privateKey.length === 128
-      ? privateKey.slice(0, 64) // First 32 bytes
-      : privateKey;
-
-    const seed = Buffer.from(hex, 'hex');
     if (seed.length !== 32) return null;
-
     return seed;
+
   } catch (err) {
     return null;
   }
