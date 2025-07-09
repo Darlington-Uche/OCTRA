@@ -134,36 +134,57 @@ app.get('/auto-tx/status/:userId', async (req, res) => {
     res.status(500).json({ error: 'Failed to get status' });
   }
 });
-// Approve/Unapprove Wallet
+// Updated Approve/Unapprove Endpoint
 app.post('/auto-tx/approve', async (req, res) => {
   try {
     const { userId } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'User ID is required' 
+      });
+    }
+
     const walletRef = db.collection('wallets').doc(String(userId));
     const doc = await walletRef.get();
-    
+
     if (!doc.exists) {
-      return res.status(404).json({ error: 'Wallet not found' });
+      return res.status(404).json({ 
+        success: false,
+        error: 'Wallet not found' 
+      });
     }
-    
-    const current = doc.data().autoApproved || false;
+
+    const currentStatus = doc.data().autoApproved || false;
+    const newStatus = !currentStatus;
+
     await walletRef.update({
-      autoApproved: !current,
-      autoApprovedAt: admin.firestore.FieldValue.serverTimestamp()
+      autoApproved: newStatus,
+      autoApprovedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
     });
+
+    // Get fresh data after update
+    const updatedDoc = await walletRef.get();
     
     res.json({
       success: true,
-      approved: !current,
-      active: doc.data().autoActive || false,
-      message: `Wallet ${!current ? 'approved' : 'unapproved'}`
+      approved: newStatus,
+      active: updatedDoc.data().autoActive || false,
+      message: `Wallet ${newStatus ? 'approved ✅' : 'unapproved ❌'}`,
+      timestamp: new Date().toISOString()
     });
-    
+
   } catch (error) {
     console.error('Approve error:', error);
-    res.status(500).json({ error: 'Approval update failed' });
+    res.status(500).json({ 
+      success: false,
+      error: 'Approval update failed',
+      details: error.message 
+    });
   }
 });
-
 
 // Start Auto Transactions
 app.post('/auto-tx/start', async (req, res) => {
