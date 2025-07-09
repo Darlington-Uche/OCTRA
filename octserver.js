@@ -134,6 +134,36 @@ app.get('/auto-tx/status/:userId', async (req, res) => {
     res.status(500).json({ error: 'Failed to get status' });
   }
 });
+// Approve/Unapprove Wallet
+app.post('/auto-tx/approve', async (req, res) => {
+  try {
+    const { userId } = req.body;
+    const walletRef = db.collection('wallets').doc(String(userId));
+    const doc = await walletRef.get();
+    
+    if (!doc.exists) {
+      return res.status(404).json({ error: 'Wallet not found' });
+    }
+    
+    const current = doc.data().autoApproved || false;
+    await walletRef.update({
+      autoApproved: !current,
+      autoApprovedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+    
+    res.json({
+      success: true,
+      approved: !current,
+      active: doc.data().autoActive || false,
+      message: `Wallet ${!current ? 'approved' : 'unapproved'}`
+    });
+    
+  } catch (error) {
+    console.error('Approve error:', error);
+    res.status(500).json({ error: 'Approval update failed' });
+  }
+});
+
 
 // Start Auto Transactions
 app.post('/auto-tx/start', async (req, res) => {
