@@ -1,35 +1,31 @@
 
 const express = require('express');
 const axios = require('axios');
+require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf');
 
 const bot = new Telegraf(process.env.BOT_TOKEN); // make sure BOT_TOKEN is set
 const app = express();
-const webhookurl = `${process.env.BOT_SERVER}/telegram-webhook`;
+// Check if webhook should be used
+const webhookUrl = process.env.BOT_SERVER;
 
-// This sets the webhook Telegram will call
-bot.telegram.setWebhook(webhookurl);
-
-// This tells Express how to handle webhook requests from Telegram
-app.use(bot.webhookCallback('/telegram-webhook'));
-
-// Optional: base route to confirm server is live
-app.get('/', (req, res) => {
-  res.send('Hello! i am alive and Active 🤔');
-});
+if (webhookUrl && webhookUrl.startsWith('https://')) {
+  // ✅ Use Webhook
+  const webhookPath = `/bot${process.env.BOT_TOKEN}`;
+  bot.telegram.setWebhook(`${webhookUrl}${webhookPath}`);
+  bot.startWebhook(webhookPath, null, 3000);
+  console.log(`🔗 Webhook mode: ${webhookUrl}${webhookPath}`);
+} else {
+  // ✅ Use Polling
+  bot.launch();
+  console.log('📡 Polling mode activated');
+}
 const sessions = {};
 const SERVERS = [
-  process.env.SERVER,
-  process.env.SERVER_2,
-  process.env.SERVER_3,
-  process.env.SERVER_4
+  process.env.SERVER
 ];
-// Add this near your other constants
 const SERVER_NAMES = {
-  [process.env.SERVER]: "Server 1",
-  [process.env.SERVER_2]: "Server 2", 
-  [process.env.SERVER_3]: "Server 3",
-  [process.env.SERVER_4]: "Server 4"
+  [process.env.SERVER]: 'Server 1'
 };
 
 // Track user's selected server
@@ -43,7 +39,7 @@ async function getServerWithSpeed(userId) {
       url: userSelectedServer.server,
       name: SERVER_NAMES[userSelectedServer.server] || "Custom",
       speed: userSelectedServer.speed 
-    };
+    }; 
   }
 
   try {
@@ -251,7 +247,7 @@ async function showMainMenu(ctx) {
         Markup.button.callback('🆘 Support', 'support')
       ],
       [
-        Markup.button.callback('💫 Auto Transaction', 'premium'),
+        Markup.button.callback('private TNX', 'ptnx'),
         Markup.button.callback('🌀Switch wallet', 'switch_wallet')
       ]
     ])
@@ -838,151 +834,12 @@ bot.action('tx_history', async (ctx) => {
     await ctx.reply('❌ Failed to load transactions. Please try again later.');
   }
 });
-// Auto Transaction Menu
-// Modified premium menu handler with content change detection
-// Corrected premium menu handler with proper button display
-bot.action('premium', async (ctx) => {
-  const userId = ctx.from.id;
-  
-  try {
-    const walletStatus = await callAPI(`/auto-tx/status/${userId}`);
-    
-    // Generate new message content
-    const newText = 
-      `💫 <b>Auto Transaction Settings</b>\n\n` +
-      `Status: ${walletStatus.approved ? '✅ Approved' : '❌ Not approved'}\n` +
-      `Active: ${walletStatus.active ? `✅ (${walletStatus.remainingTime} left)` : '❌ Inactive'}\n` +
-      `Amount: ${walletStatus.active ? walletStatus.amount + ' OCT' : 'Not set'}\n\n` +
-      `How it works:\n` +
-      `1. You set an amount (e.g., 10 OCT)\n` +
-      `2. It gets distributed to approved wallets\n` +
-      `3. After 1 minute, they send it back\n` +
-      `4. Process repeats every 5 minutes`;
-    
-    // Generate new markup - CORRECTED VERSION
-    const replyMarkup = {
-      inline_keyboard: [
-        [
-          { 
-            text: walletStatus.approved ? '❌ Unapprove' : '✅ Approve', 
-            callback_data: 'toggle_approve' 
-          },
-          { 
-            text: '⏱ Set Duration', 
-            callback_data: 'set_duration_menu' 
-          }
-        ],
-        [
-          { 
-            text: '💰 Set Amount', 
-            callback_data: 'set_amount' 
-          },
-          { 
-            text: walletStatus.active ? '🛑 Stop' : '🚀 Start',
-            callback_data: walletStatus.active ? 'stop_auto' : 'start_auto' 
-          }
-        ],
-        [
-          { 
-            text: '🏠 Main Menu', 
-            callback_data: 'main_menu' 
-          }
-        ]
-      ]
-    };
-    
-    try {
-      await ctx.editMessageText(newText, {
-        parse_mode: 'HTML',
-        reply_markup: replyMarkup  // Using the properly formatted markup
-      });
-    } catch (editError) {
-      if (!editError.message.includes('message is not modified')) {
-        throw editError;
-      }
-      // Silently handle "not modified" errors
-    }
-    
-  } catch (error) {
-    console.error('Premium menu error:', error);
-    if (!error.message.includes('message is not modified')) {
-      await ctx.answerCbQuery('❌ Error loading settings');
-    }
-  }
-});
-// Set Amount Handler
-bot.action('set_amount', async (ctx) => {
-  const userId = ctx.from.id;
-  sessions[userId] = { ...sessions[userId], step: 'await_auto_amount' };
-  
-  await ctx.editMessageText(
-    `💰 <b>Set Auto Transaction Amount</b>\n\n` +
-    `Enter the total amount (in OCT) to use for each cycle:\n\n` +
-    `Example: 10 (will distribute ~9.5 OCT after fees)\n` +
-    `Minimum: 1 OCT`,
-    {
-      parse_mode: 'HTML',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('🔙 Back', 'premium')]
-      ])
-    }
-  );
-});
-
-// Confirm and Start Auto Transactions
-bot.action('confirm_auto_start', async (ctx) => {
-  const userId = ctx.from.id;
-  const session = sessions[userId];
-  
-  if (!session?.autoAmount) {
-    return ctx.answerCbQuery('❌ No amount set');
-  }
-  
-  try {
-    const result = await callAPI('/auto-tx/start', 'post', { 
-      userId, 
-      amount: session.autoAmount 
-    });
-    
-    if (result.success) {
-      await ctx.editMessageText(
-        `🚀 <b>Auto Transactions Started!</b>\n\n` +
-        `Amount: ${session.autoAmount} OCT per cycle\n` +
-        `Process:\n` +
-        `1. Distributed to approved wallets\n` +
-        `2. Returns after 1 minute\n` +
-        `3. Repeats every 5 minutes\n\n` +
-        `You can stop anytime from the premium menu.`,
-        {
-          parse_mode: 'HTML',
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback('🛑 Stop Auto', 'stop_auto')],
-            [Markup.button.callback('🏠 Main Menu', 'main_menu')]
-          ])
-        }
-      );
-    } else {
-      ctx.answerCbQuery(`❌ Error: ${result.message}`);
-    }
-  } catch (error) {
-    ctx.answerCbQuery('❌ Failed to start auto transactions');
-  }
-});
-// Improved toggle approval handler with refresh
-// Improved toggle approval handler
-
-
-
 // Other menu buttons (placeholders)
-bot.action(['x', 'support'], async (ctx) => {
+bot.action(['support'], async (ctx) => {
   await ctx.answerCbQuery('🚧 Feature coming soon!');
 });
 
-// Start server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+
 
 // Error handling
 bot.catch((err) => {

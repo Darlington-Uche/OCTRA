@@ -1,0 +1,163 @@
+# 🤖 Octra Telegram Bot & Transaction Server
+
+A complete Telegram bot integrated with the Octra blockchain. This project includes:
+
+* A Telegraf-powered bot for interacting with users
+* An Express API server for sending and managing transactions
+* Firebase integration for wallet & transaction storage
+* Support for both local and cloud deployment (e.g., Railway, Render)
+
+---
+
+## 📆 LOCAL SETUP (PC or Termux)
+
+Follow these steps to run the bot and server locally.
+
+### 1. 🌀 Fork or Clone the Repository
+
+```bash
+git clone https://github.com/YOUR_USERNAME/octra-bot.git
+cd octra-bot
+```
+
+---
+
+### 2. 🔐 Replace the `.env` File with Your Secrets
+
+Create a `.env` file in the project root and fill in your secrets.
+
+> ✅ **For local usage**, you can leave `BOT_SERVER` and `SERVER` empty.
+
+```dotenv
+# Telegram
+BOT_TOKEN=your_telegram_bot_token
+
+# Firebase service account credentials
+FB_PROJECT_ID=your_project_id
+FB_CLIENT_EMAIL=your_service_account_email
+FB_CLIENT_ID=your_client_id
+FB_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMIIEv...snip...\n-----END PRIVATE KEY-----\n"
+FB_PRIVATE_KEY_ID=your_private_key_id
+FB_CLIENT_CERT_URL=https://www.googleapis.com/robot/v1/metadata/x509/...
+
+# Optional for webhooks (leave empty for local)
+BOT_SERVER=
+SERVER=
+
+# Firebase Realtime DB or Firestore
+FB_DATABASE_URL=https://your_project_id.firebaseio.com
+```
+
+---
+
+### 3. 📆 Install Dependencies
+
+```bash
+npm install
+```
+
+---
+
+### 4. ▶️ Run the Project
+
+Choose how you want to run the bot:
+
+#### 🔀 Full local development:
+
+```bash
+npm start        # Runs both bot and server BEST FOR LOCAL DEVELOPMENt
+``
+
+#### 🔹 Run only the bot:
+
+```bash
+npm run bot
+```
+
+#### 🔹 Run only the server:
+
+```bash
+npm run server
+```
+
+---
+
+### 5. ✅ Your Octra bot is now running locally!
+
+It will default to **polling mode** unless `BOT_SERVER` is defined and uses `https://`.
+
+---
+
+## 🌍 DEPLOYMENT GUIDE
+
+For production/development deployment:
+
+### 1. 🌀 Fork or Clone the Repository
+
+```bash
+git clone https://github.com/YOUR_USERNAME/octra-bot.git
+```
+
+---
+
+### 2. 🔐 Configure Your `.env` for Cloud Hosting
+
+Replace `.env` with your production secrets. Make sure to set the public URLs:
+
+```dotenv
+BOT_TOKEN=your_telegram_bot_token
+BOT_SERVER=https://your-deployed-domain.com  # For webhook mode
+SERVER=https://your-deployed-api.com
+# (other Firebase keys remain the same)
+```
+
+---
+
+### 3. 🔗 Deploy
+
+* Deploy `octserver.js` to platforms like:
+
+  * Railway
+  * Render
+  * Fly.io
+  * Vercel (API-only)
+
+* Ensure HTTPS is used for `BOT_SERVER`, as Telegram **requires** it for webhooks.
+
+---
+
+## 🔑 How to Get Credentials
+
+### 📌 Firebase Service Account
+
+1. Go to [Firebase Console](https://console.firebase.google.com)
+2. Open your project
+3. Go to:
+   `Project Settings → Service accounts → Generate new private key`
+4. Copy the values into your `.env` file accordingly.
+
+---
+
+### 🧠 Telegram Bot Token
+
+1. Open Telegram and message [@BotFather](https://t.me/BotFather)
+2. Use the command `/newbot` and follow the steps
+3. Copy the generated token and paste into your `.env` file under `BOT_TOKEN`
+
+---
+
+## 🛠️ Troubleshooting
+
+
+---
+
+## 🤛 Questions or Help?
+
+Contact the maintainer:
+**[@UNKNOWN2226](https://t.me/UNKNOWN2226) on Telegram**
+
+---
+
+## 📄 License
+
+MIT License — Free to use, modify, and share. Please credit if possible.

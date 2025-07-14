@@ -1,8 +1,5 @@
-
-
-
-
 const express = require('express');
+require('dotenv').config();
 const cors = require('cors');
 const crypto = require('crypto');
 const bip39 = require('bip39');
@@ -10,14 +7,13 @@ const nacl = require('tweetnacl');
 const bs58 = require('bs58');
 const axios = require('axios');
 const admin = require('firebase-admin');
-require('dotenv').config();
 
 // Reconstruct the service account from environment variables
 const serviceAccount = {
   type: "service_account",
   project_id: process.env.FB_PROJECT_ID,
   private_key_id: process.env.FB_PRIVATE_KEY_ID,
-  private_key: process.env.FB_PRIVATE_KEY.replace(/\\n/g, '\n'),
+  private_key: process.env.FB_PRIVATE_KEY,
   client_email: process.env.FB_CLIENT_EMAIL,
   client_id: process.env.FB_CLIENT_ID,
   auth_uri: "https://accounts.google.com/o/oauth2/auth",
@@ -82,251 +78,6 @@ app.get('/get-all-users', async (req, res) => {
   }
 });
 
-// Stop Auto Transactions
-app.post('/auto-tx/stop', async (req, res) => {
-  try {
-    const { userId } = req.body;
-    const walletRef = db.collection('wallets').doc(String(userId));
-    
-    await walletRef.update({
-      autoActive: false,
-      autoStoppedAt: admin.firestore.FieldValue.serverTimestamp()
-    });
-    
-    res.json({
-      success: true,
-      message: 'Auto transactions stopped',
-      active: false
-    });
-    
-  } catch (error) {
-    console.error('Stop error:', error);
-    res.status(500).json({ error: 'Failed to stop auto transactions' });
-  }
-});
-
-// Add these endpoints to your existing server
-
-// Auto Transaction Status
-app.get('/auto-tx/status/:userId', async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const walletRef = db.collection('wallets').doc(String(userId));
-    const doc = await walletRef.get();
-    
-    if (!doc.exists) return res.status(404).json({ error: 'Wallet not found' });
-    
-    const wallet = doc.data();
-    const now = Date.now();
-    const endTime = wallet.autoStartedAt?.toDate()?.getTime() + (wallet.autoDuration * 60000) || 0;
-    const remainingMins = Math.max(0, Math.round((endTime - now) / 60000));
-    
-    res.json({
-      approved: wallet.autoApproved || false,
-      active: wallet.autoActive || false,
-      duration: wallet.autoDuration || 0,
-      amount: wallet.autoAmount || 0,
-      remainingTime: `${remainingMins} mins`,
-      lastCycle: wallet.lastAutoCycle?.toDate() || null
-    });
-  } catch (error) {
-    console.error('Status error:', error);
-    res.status(500).json({ error: 'Failed to get status' });
-  }
-});
-// Updated Approve/Unapprove Endpoint
-app.post('/auto-tx/approve', async (req, res) => {
-  try {
-    const { userId } = req.body;
-    
-    if (!userId) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'User ID is required' 
-      });
-    }
-
-    const walletRef = db.collection('wallets').doc(String(userId));
-    const doc = await walletRef.get();
-
-    if (!doc.exists) {
-      return res.status(404).json({ 
-        success: false,
-        error: 'Wallet not found' 
-      });
-    }
-
-    const currentStatus = doc.data().autoApproved || false;
-    const newStatus = !currentStatus;
-
-    await walletRef.update({
-      autoApproved: newStatus,
-      autoApprovedAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    });
-
-    // Get fresh data after update
-    const updatedDoc = await walletRef.get();
-    
-    res.json({
-      success: true,
-      approved: newStatus,
-      active: updatedDoc.data().autoActive || false,
-      message: `Wallet ${newStatus ? 'approved ✅' : 'unapproved ❌'}`,
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error) {
-    console.error('Approve error:', error);
-    res.status(500).json({ 
-      success: false,
-      error: 'Approval update failed',
-      details: error.message 
-    });
-  }
-});
-
-// Start Auto Transactions
-app.post('/auto-tx/start', async (req, res) => {
-  try {
-    const { userId, amount } = req.body;
-    const walletRef = db.collection('wallets').doc(String(userId));
-    const doc = await walletRef.get();
-    
-    if (!doc.exists) return res.status(404).json({ error: 'Wallet not found' });
-    
-    const wallet = doc.data();
-    
-    // Validate
-    if (!wallet.autoApproved) {
-      return res.json({ success: false, message: 'Wallet not approved for auto transactions' });
-    }
-    
-    if (amount <= 0) {
-      return res.json({ success: false, message: 'Amount must be positive' });
-    }
-    
-    // Check balance
-    const balanceRes = await axios.get(`${RPC_ENDPOINT}/balance/${wallet.address}`);
-    const balance = parseFloat(balanceRes.data.balance) || 0;
-    
-    if (balance < amount) {
-      return res.json({ success: false, message: 'Insufficient balance' });
-    }
-    
-    // Update wallet settings
-    await walletRef.update({
-      autoActive: true,
-      autoAmount: amount,
-      autoStartedAt: admin.firestore.FieldValue.serverTimestamp(),
-      lastAutoCycle: null
-    });
-    
-    // Immediately start first cycle
-    setTimeout(() => processAutoCycle(userId), 1000);
-    
-    res.json({
-      success: true,
-      message: 'Auto transactions started',
-      amount,
-      active: true
-    });
-  } catch (error) {
-    console.error('Start error:', error);
-    res.status(500).json({ error: 'Failed to start auto transactions' });
-  }
-});
-
-// Process one complete cycle (send out and receive back)
-async function processAutoCycle(userId) {
-  try {
-    const walletRef = db.collection('wallets').doc(String(userId));
-    const wallet = (await walletRef.get()).data();
-    
-    // Check if still active and duration not expired
-    if (!wallet.autoActive) return;
-    
-    const now = Date.now();
-    const endTime = wallet.autoStartedAt.toDate().getTime() + (wallet.autoDuration * 60000);
-    if (now > endTime) {
-      await walletRef.update({ autoActive: false });
-      return;
-    }
-    
-    // Get all approved wallets (excluding self)
-    const approvedWallets = await db.collection('wallets')
-      .where('autoApproved', '==', true)
-      .where('userId', '!=', userId)
-      .limit(50)
-      .get();
-    
-    if (approvedWallets.size === 0) {
-      console.log('No approved wallets found');
-      return;
-    }
-    
-    // Calculate amount per recipient (5% less to account for fees)
-    const amountPerRecipient = (wallet.autoAmount * 0.95) / approvedWallets.size;
-    
-    // Prepare recipients array
-    const recipients = approvedWallets.docs.map(doc => ({
-      address: doc.data().address,
-      amount: amountPerRecipient
-    }));
-    
-    // Send out batch transaction
-    const sendResult = await axios.post(`${RPC_ENDPOINT}/send-multi`, {
-      userId,
-      recipients
-    });
-    
-    if (sendResult.data.successCount === 0) {
-      throw new Error('Failed to send batch transaction');
-    }
-    
-    // Wait 1 minute before sending back
-    await new Promise(resolve => setTimeout(resolve, 60000));
-    
-    // Prepare return transactions
-    const returnRecipients = approvedWallets.docs.map(doc => ({
-      address: wallet.address, // Send back to original wallet
-      amount: amountPerRecipient * 0.95 // 5% fee deduction
-    }));
-    
-    // Send returns (each wallet sends back individually with small delay)
-    for (const recipient of approvedWallets.docs) {
-      const recipientData = recipient.data();
-      
-      try {
-        await axios.post(`${RPC_ENDPOINT}/send-tx`, {
-          userId: recipientData.userId,
-          recipients: [{
-            address: wallet.address,
-            amount: amountPerRecipient * 0.95
-          }]
-        });
-        
-        // Small delay between return transactions
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      } catch (error) {
-        console.error(`Failed return tx from ${recipientData.address}:`, error.message);
-      }
-    }
-    
-    // Update last cycle time and schedule next
-    await walletRef.update({
-      lastAutoCycle: admin.firestore.FieldValue.serverTimestamp()
-    });
-    
-    // Schedule next cycle after 5 minute cooldown
-    setTimeout(() => processAutoCycle(userId), 5 * 60 * 1000);
-    
-  } catch (error) {
-    console.error('Auto cycle error:', error);
-    // Retry after 10 minutes on error
-    setTimeout(() => processAutoCycle(userId), 10 * 60 * 1000);
-  }
-}
 // Multi-send endpoint (based)
 app.post('/send-multi', async (req, res) => {
   try {
@@ -891,7 +642,7 @@ function extractSeedFromPrivateKey(privateKey) {
   }
 }
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 5000;
 
 // 🩺 Health Check Endpoint
 app.get('/health', (req, res) => {
