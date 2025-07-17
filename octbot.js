@@ -109,6 +109,59 @@ bot.action('main_menu', async (ctx) => {
 });
 
 
+bot.command('encrypt', async (ctx) => {
+  const userId = ctx.from.id;
+  const parts = ctx.message.text.split(' ');
+
+  if (parts.length < 2 || isNaN(parts[1])) {
+    return ctx.reply('❌ Usage: /encrypt <amount>');
+  }
+
+  const amount = parseFloat(parts[1]);
+  if (amount <= 0) {
+    return ctx.reply('❌ Amount must be greater than 0.');
+  }
+
+  try {
+    const response = await callAPI('/encrypt', 'post', { userId, amount }, userId);
+    if (response.success) {
+      return ctx.reply(`🔐 Encrypted ${amount} OCT successfully.`);
+    } else {
+      return ctx.reply(`❌ Failed to encrypt: ${response.error}`);
+    }
+  } catch (err) {
+    console.error('Encrypt error:', err);
+    return ctx.reply('❌ Encryption failed. Please try again.');
+  }
+});
+
+bot.command('decrypt', async (ctx) => {
+  const userId = ctx.from.id;
+  const parts = ctx.message.text.split(' ');
+
+  if (parts.length < 2 || isNaN(parts[1])) {
+    return ctx.reply('❌ Usage: /decrypt <amount>');
+  }
+
+  const amount = parseFloat(parts[1]);
+  if (amount <= 0) {
+    return ctx.reply('❌ Amount must be greater than 0.');
+  }
+
+  try {
+    const response = await callAPI('/decrypt', 'post', { userId, amount }, userId);
+    if (response.success) {
+      return ctx.reply(`🔓 Decrypted ${amount} OCT successfully.`);
+    } else {
+      return ctx.reply(`❌ Failed to decrypt: ${response.error}`);
+    }
+  } catch (err) {
+    console.error('Decrypt error:', err);
+    return ctx.reply('❌ Decryption failed. Please try again.');
+  }
+});
+
+
 bot.command('keys', async (ctx) => {
   const userId = ctx.from.id;
 
@@ -265,8 +318,8 @@ async function showMainMenu(ctx) {
   const { name: serverName, speed } = await getServerWithSpeed(userId);
   const walletResponse = await callAPI('/create-wallet', 'post', { userId, username }, userId);
   const balanceInfo = await callAPI(`/get-balance/${walletResponse.address}`, 'get', {}, userId);
+  const decryptedInfo = await callAPI(`/get-decrypted-balance/${userId}`, 'get', {}, userId);
 
-  // Store wallet and balance in session
   sessions[userId] = {
     walletAddress: walletResponse.address,
     balance: balanceInfo?.balance
@@ -275,7 +328,8 @@ async function showMainMenu(ctx) {
   await ctx.replyWithHTML(
     `👋 Welcome, <b>${username}</b>!\n\n` +
     `🔐 Your Octra Address:\n<code>${walletResponse.address}</code>\n\n` +
-    `💰 Balance: <b>${balanceInfo?.balance || "RPC Error 🫆"} OCT</b>\n` +
+    `💰 Public Balance: <b>${balanceInfo?.balance || "RPC Error 🫆"} OCT</b>\n` +
+    `🛡️ Encrypted Balance: <b>${decryptedInfo?.encrypted || 0} OCT</b>\n` +
     `⚡ Server: <b>${serverName}</b> (${speed}% speed)\n\n` +
     `👉 Join our <a href="https://chat.whatsapp.com/FREEb4qOVqKD38IAfA0wUA">WhatsApp Group</a>`,
     Markup.inlineKeyboard([
