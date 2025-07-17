@@ -656,40 +656,70 @@ app.post('/send-private-tx', async (req, res) => {
     }
 
     const wallet = doc.data();
-const senderAddr = wallet.address;
-const privateKeyHex = wallet.privateKey;
-const seed = extractSeedFromPrivateKey(privateKeyHex);
+    const senderAddr = wallet.address;
+    const privateKeyHex = wallet.privateKey;
+    const seed = xtractSeedFromPrivateKey(privateKeyHex);
 
-if (!seed) {
-  return res.status(400).json({ error: 'Invalid private key format' });
-}
+    if (!seed) {
+      return res.status(400).json({ error: 'Invalid private key format' });
+    }
 
-const privateKeyBase64 = seed.toString('base64');
+    const privateKeyBase64 = seed.toString('base64');
+    const μ = 1_000_000;
+    const amountRaw = Math.round((amount + 0.1) * μ); // includes +0.1 OCT gas
 
-// 1. Check recipient public key availability
-const addrInfoRes = await axios.get(`${RPC_ENDPOINT}/address/${recipient}`);
-if (!addrInfoRes.data?.has_public_key) {
-  return res.status(400).json({ error: 'Recipient has no public key' });
-}
+    // 1. Check if recipient has a public key
+    const addrInfoRes = await axios.get(`${RPC_ENDPOINT}/address/${recipient}`);
+    if (!addrInfoRes.data?.has_public_key) {
+      return res.status(400).json({ error: 'Recipient has no public key' });
+    }
 
-// 2. Get recipient public key
-const pubKeyRes = await axios.get(`${RPC_ENDPOINT}/public_key/${recipient}`);
-const toPublicKey = pubKeyRes.data?.public_key;
-if (!toPublicKey) {
-  return res.status(400).json({ error: 'Cannot fetch recipient public key' });
-}
+    // 2. Get encrypted balance
+    const balanceRes = await axios.get(`${RPC_ENDPOINT}/view_encrypted_balance/${senderAddr}`, {
+      headers: { 'X-Private-Key': privateKeyBase64 }
+    });
 
-const μ = 1000000;
-const data = {
-  from: senderAddr,
-  to: recipient,
-  amount: String(Math.round(amount * μ)),
-  from_private_key: privateKeyBase64,
-  to_public_key: toPublicKey
-};
+    const currentEncryptedRaw = parseInt(balanceRes.data?.encrypted_balance_raw || '0');
+    const newEncryptedRaw = currentEncryptedRaw + amountRaw;
 
-const response = await axios.post(`${RPC_ENDPOINT}/private_transfer`, data);
+    // 3. Locally generate encrypted_data for new balance
+    const salt = Buffer.from('octra_encrypted_balance_v2');
+    const key = crypto.createHash('sha256').update(Buffer.concat([salt, seed])).digest().slice(0, 32);
+    const nonce = crypto.randomBytes(12);
+    const plaintext = Buffer.from(newEncryptedRaw.toString());
 
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce);
+    const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+    const tag = cipher.getAuthTag();
+
+    const encryptedData = Buffer.concat([nonce, ciphertext, tag]);
+    const encryptedBalanceValue = 'v2|' + encryptedData.toString('base64');
+
+    // 4. Encrypt balance remotely
+    await axios.post(`${RPC_ENDPOINT}/encrypt_balance`, {
+      address: senderAddr,
+      amount: String(amountRaw),
+      private_key: privateKeyBase64,
+      encrypted_data: encryptedBalanceValue
+    });
+
+    // 5. Get recipient public key
+    const pubKeyRes = await axios.get(`${RPC_ENDPOINT}/public_key/${recipient}`);
+    const toPublicKey = pubKeyRes.data?.public_key;
+    if (!toPublicKey) {
+      return res.status(400).json({ error: 'Cannot fetch recipient public key' });
+    }
+
+    // 6. Send the private transfer
+    const transferRes = await axios.post(`${RPC_ENDPOINT}/private_transfer`, {
+      from: senderAddr,
+      to: recipient,
+      amount: String(Math.round(amount * μ)), // actual amount sent
+      from_private_key: privateKeyBase64,
+      to_public_key: toPublicKey
+    });
+
+    // 7. Store in Firestore
     await db.collection('transactions').add({
       userId,
       from: senderAddr,
@@ -698,19 +728,20 @@ const response = await axios.post(`${RPC_ENDPOINT}/private_transfer`, data);
       timestamp: admin.firestore.FieldValue.serverTimestamp(),
       status: 'pending',
       isPrivate: true,
-      txHash: response.data?.tx_hash || null
+      txHash: transferRes.data?.tx_hash || null
     });
 
-    res.json({ success: true, ...response.data });
+    res.json({ success: true, ...transferRes.data });
 
   } catch (error) {
-    console.error('Private transfer failed:', error);
+    console.error('Private transfer failed:', error?.response?.data || error.message);
     res.status(500).json({
       error: 'Private transaction error',
-      details: error.response?.data || error.message
+      details: error?.response?.data || error.message
     });
   }
 });
+
 app.get('/pending-private', async (req, res) => {
   try {
     const { userId } = req.query;
