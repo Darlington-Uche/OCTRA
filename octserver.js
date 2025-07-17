@@ -656,32 +656,33 @@ app.post('/send-private-tx', async (req, res) => {
     }
 
     const wallet = doc.data();
-    const senderAddr = wallet.address;
-    const privateKey = wallet.privateKey;
+const senderAddr = wallet.address;
+const privateKeyHex = wallet.privateKey;
+const privateKeyBase64 = Buffer.from(privateKeyHex, 'hex').toString('base64');
 
-    // 1. Check recipient public key availability
-    const addrInfoRes = await axios.get(`${RPC_ENDPOINT}/address/${recipient}`);
-    if (!addrInfoRes.data?.has_public_key) {
-      return res.status(400).json({ error: 'Recipient has no public key' });
-    }
+// 1. Check recipient public key availability
+const addrInfoRes = await axios.get(`${RPC_ENDPOINT}/address/${recipient}`);
+if (!addrInfoRes.data?.has_public_key) {
+  return res.status(400).json({ error: 'Recipient has no public key' });
+}
 
-    // 2. Get recipient public key
-    const pubKeyRes = await axios.get(`${RPC_ENDPOINT}/public_key/${recipient}`);
-    const toPublicKey = pubKeyRes.data?.public_key;
-    if (!toPublicKey) {
-      return res.status(400).json({ error: 'Cannot fetch recipient public key' });
-    }
+// 2. Get recipient public key
+const pubKeyRes = await axios.get(`${RPC_ENDPOINT}/public_key/${recipient}`);
+const toPublicKey = pubKeyRes.data?.public_key;
+if (!toPublicKey) {
+  return res.status(400).json({ error: 'Cannot fetch recipient public key' });
+}
 
-    const μ = 1000000;
-    const data = {
-      from: senderAddr,
-      to: recipient,
-      amount: String(Math.round(amount * μ)),
-      from_private_key: privateKey,
-      to_public_key: toPublicKey
-    };
+const μ = 1000000;
+const data = {
+  from: senderAddr,
+  to: recipient,
+  amount: String(Math.round(amount * μ)),
+  from_private_key: privateKeyBase64,
+  to_public_key: toPublicKey
+};
 
-    const response = await axios.post(`${RPC_ENDPOINT}/private_transfer`, data);
+const response = await axios.post(`${RPC_ENDPOINT}/private_transfer`, data);
 
     await db.collection('transactions').add({
       userId,
@@ -735,9 +736,13 @@ app.post('/claim-private', async (req, res) => {
 
     const wallet = doc.data();
 
+    // Convert stored hex private key to base64
+    const privateKeyHex = wallet.privateKey;
+    const privateKeyBase64 = Buffer.from(privateKeyHex, 'hex').toString('base64');
+
     const claimRes = await axios.post(`${RPC_ENDPOINT}/claim_private_transfer`, {
       recipient_address: wallet.address,
-      private_key: wallet.privateKey,
+      private_key: privateKeyBase64,
       transfer_id: transferId
     });
 
