@@ -109,76 +109,7 @@ bot.action('main_menu', async (ctx) => {
   await showMainMenu(ctx);
 });
 
-//start ✨
-// Handle private transaction command
 
-bot.command('private', async (ctx) => {
-  const userId = ctx.from.id;
-  const text = ctx.message.text;
-  const parts = text.split(' ');
-
-  if (parts.length < 3) {
-    return ctx.reply('❌ Usage:\n/private <address> <amount> [optional message]');
-  }
-
-  const recipient = parts[1];
-  const amount = parseFloat(parts[2]);
-  const message = parts.slice(3).join(' ');
-
-  if (!recipient || isNaN(amount) || amount <= 0) {
-    return ctx.reply('❌ Invalid address or amount.');
-  }
-
-  const wallet = sessions[userId];
-  if (!wallet || !wallet.walletAddress) {
-    return ctx.reply('⚠️ Wallet not found. Use /start to create one.');
-  }
-
-  // Step 1: Automatically claim pending private transfers first
-  try {
-    const pending = await axios.get(`${process.env.SERVER}/pending-private`, {
-  params: { userId }
-});
-    if (pending.success && pending.pending.length > 0) {
-      await ctx.reply(`🔎 Found ${pending.pending.length} pending transfer(s). Claiming...`);
-
-      for (const tx of pending.pending) {
-        const claim = await axios.post(`${process.env.SERVER}/claim-private`, {
-  userId,
-  transferId: tx.id
-});
-        if (claim.success) {
-          await ctx.reply(`✅ Claimed private TX from: <code>${tx.from}</code>\nAmount: ${parseFloat(tx.amount) / 1e6} OCT`, { parse_mode: 'HTML' });
-        } else {
-          await ctx.reply(`❌ Failed to claim transfer: ${tx.id}`);
-        }
-      }
-    }
-  } catch (err) {
-    console.error('Error checking or claiming:', err);
-    await ctx.reply('⚠️ Failed to check/claim pending private transfers. Proceeding anyway...');
-  }
-
-  // Step 2: Send the private transaction
-  try {
- const sendRes = await axios.post(`${process.env.SERVER}/send-private-tx`, {
-  userId,
-  recipient,
-  amount,
-  message
-});
-    if (sendRes.success) {
-      return ctx.replyWithHTML(
-        `✅ Private transaction sent!\n\n🔐 To: <code>${recipient}</code>\n💸 Amount: <b>${amount}</b> OCT`
-      );
-    } else {
-      return ctx.reply(`❌ Failed to send private TX: ${sendRes.error || 'Unknown error'}`);
-    }
-  } catch (err) {
-    console.error('Private TX send error:', err);
-    return ctx.reply('❌ Failed to send private transaction. Please try again.');
-  }
-});
 bot.command('keys', async (ctx) => {
   const userId = ctx.from.id;
 
