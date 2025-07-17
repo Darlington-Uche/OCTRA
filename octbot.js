@@ -31,6 +31,23 @@ const SERVER_NAMES = {
 // Track user's selected server
 const userServers = new Map();
 
+// Helper f
+async function callAPI2(endpoint, method, data, userId) {
+  try {
+    const response = await axios({
+      method,
+      url: `${API_BASE_URL}${endpoint}`,
+      data,
+      headers: {
+        'X-User-ID': userId
+      }
+    });
+    return response.data;
+  } catch (error) {
+    console.error(`API call to ${endpoint} failed:`, error);
+    throw error;
+  }
+}
 // Modified getLeastBusyServer to include speed test
 async function getServerWithSpeed(userId) {
   const userSelectedServer = userServers.get(userId);
@@ -152,7 +169,7 @@ bot.command('private', async (ctx) => {
   const userId = ctx.from.id;
   
   try {
-    const response = await callAPI('/send-private-tx', 'post', {
+    const response = await callAPI2('/send-private-tx', 'post', {
       userId,
       recipient,
       amount,
@@ -882,7 +899,7 @@ bot.action('ptnx', async (ctx) => {
   const userId = ctx.from.id;
   
   // Check if user has pending transactions to claim first
-  const pendingResponse = await callAPI(`/pending-private-tx/${userId}`, 'get', {}, userId);
+  const pendingResponse = await callAPI2(`/pending-private-tx/${userId}`, 'get', {}, userId);
   
   if (pendingResponse.pendingTransactions && pendingResponse.pendingTransactions.length > 0) {
     // Show pending transactions with claim buttons
@@ -921,7 +938,7 @@ bot.action(/^claim_(.+)/, async (ctx) => {
   const txHash = ctx.match[1];
   
   try {
-    const claimResponse = await callAPI('/claim-private-tx', 'post', { userId, txHash }, userId);
+    const claimResponse = await callAPI2('/claim-private-tx', 'post', { userId, txHash }, userId);
     
     if (claimResponse.success) {
       await ctx.replyWithHTML(
