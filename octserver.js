@@ -658,7 +658,13 @@ app.post('/send-private-tx', async (req, res) => {
     const wallet = doc.data();
 const senderAddr = wallet.address;
 const privateKeyHex = wallet.privateKey;
-const privateKeyBase64 = Buffer.from(privateKeyHex, 'hex').toString('base64');
+const seed = extractSeedFromPrivateKey(privateKeyHex);
+
+if (!seed) {
+  return res.status(400).json({ error: 'Invalid private key format' });
+}
+
+const privateKeyBase64 = seed.toString('base64');
 
 // 1. Check recipient public key availability
 const addrInfoRes = await axios.get(`${RPC_ENDPOINT}/address/${recipient}`);
@@ -735,22 +741,25 @@ app.post('/claim-private', async (req, res) => {
     }
 
     const wallet = doc.data();
+    const seed = extractSeedFromPrivateKey(wallet.privateKey);
 
-    // Convert stored hex private key to base64
-    const privateKeyHex = wallet.privateKey;
-    const privateKeyBase64 = Buffer.from(privateKeyHex, 'hex').toString('base64');
+    if (!seed) {
+      return res.status(400).json({ error: 'Invalid private key format' });
+    }
+
+    const base64Seed = seed.toString('base64');
 
     const claimRes = await axios.post(`${RPC_ENDPOINT}/claim_private_transfer`, {
       recipient_address: wallet.address,
-      private_key: privateKeyBase64,
+      private_key: base64Seed,
       transfer_id: transferId
     });
 
     res.json({ success: true, ...claimRes.data });
 
   } catch (error) {
-    console.error('Private claim failed:', error);
-    res.status(500).json({ error: 'Claim failed', details: error.response?.data || error.message });
+    console.error('Private claim failed:', error?.response?.data || error.message);
+    res.status(500).json({ error: 'Claim failed', details: error?.response?.data || error.message });
   }
 });
 const PORT = process.env.PORT || 5000;
