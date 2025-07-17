@@ -618,7 +618,7 @@ app.post('/switch-wallet', async (req, res) => {
   }
 });
 
-function extractSeedFromPrivateKey(privateKey) {
+function xtractSeedFromPrivateKey(privateKey) {
   try {
     if (typeof privateKey !== 'string') return null;
 
@@ -674,7 +674,7 @@ app.post('/claim-private', async (req, res) => {
     }
 
     const wallet = doc.data();
-    const seed = extractSeedFromPrivateKey(wallet.privateKey);
+    const seed = xtractSeedFromPrivateKey(wallet.privateKey);
 
     if (!seed) {
       return res.status(400).json({ error: 'Invalid private key format' });
@@ -901,7 +901,7 @@ app.post('/send-private-tx', async (req, res) => {
 
     const wallet = doc.data();
     const senderAddr = wallet.address;
-    const seed = extractSeedFromPrivateKey(wallet.privateKey);
+    const seed = xtractSeedFromPrivateKey(wallet.privateKey);
 
     if (!seed) {
       return res.status(400).json({ error: 'Invalid private key format' });
