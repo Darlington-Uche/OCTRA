@@ -886,76 +886,57 @@ bot.action('tx_history', async (ctx) => {
     await ctx.reply('❌ Failed to load transactions. Please try again later.');
   }
 });
-// Enhanced private transaction handler with server selection
+// Handle private transaction button in Telegram bot
 bot.action('ptnx', async (ctx) => {
   const userId = ctx.from.id;
   
-  try {
-    // Check pending transactions using callAPI
-    const pendingResponse = await callAPI(`/pending-private-tx/${userId}`, 'get', {}, userId);
+  // Check if user has pending transactions to claim first
+  const pendingResponse = await callAPI(`/pending-private-tx/${userId}`, 'get', {}, userId);
+  
+  if (pendingResponse.pendingTransactions && pendingResponse.pendingTransactions.length > 0) {
+    // Show pending transactions with claim buttons
+    const buttons = pendingResponse.pendingTransactions.map(tx => (
+      [Markup.button.callback(
+        `🔒 ${tx.amount} OCT from ${tx.from.slice(0, 6)}...${tx.from.slice(-4)}`,
+        `claim_${tx.txHash}`
+      )]
+    ));
     
-    if (pendingResponse.pendingTransactions && pendingResponse.pendingTransactions.length > 0) {
-      // Create buttons for each pending transaction
-      const buttons = pendingResponse.pendingTransactions.map(tx => [
-        Markup.button.callback(
-          `🔒 ${tx.amount} OCT from ${shortAddress(tx.from)}`,
-          `claim_${tx.txHash}`
-        )
-      ]);
-      
-      buttons.push([Markup.button.callback('⬅️ Back', 'main_menu')]);
-      
-      await ctx.replyWithHTML(
-        `🔐 You have <b>${pendingResponse.pendingTransactions.length}</b> pending private transactions:\n\n` +
-        `Click on any to claim them to your wallet.`,
-        Markup.inlineKeyboard(buttons)
-      );
-    } else {
-      // Show private send instructions
-      await ctx.replyWithHTML(
-        '💱 <b>Send Private Transaction</b>\n\n' +
-        'Enter recipient address and amount in this format:\n' +
-        '<code>/private [address] [amount] [optional message]</code>\n\n' +
-        'Example:\n' +
-        '<code>/private octra1abc...xyz 10.5 "For coffee"</code>\n\n' +
-        'ℹ️ Private transactions require the recipient to claim them.',
-        Markup.inlineKeyboard([
-          [Markup.button.callback('⬅️ Back', 'main_menu')]
-        ])
-      );
-    }
-  } catch (error) {
-    console.error('Error in private transaction menu:', error);
-    await ctx.reply('⚠️ An error occurred. Please try again.');
-    await showMainMenu(ctx);
+    buttons.push([Markup.button.callback('⬅️ Back', 'main_menu')]);
+    
+    await ctx.replyWithHTML(
+      `🔐 You have <b>${pendingResponse.pendingTransactions.length}</b> pending private transactions:\n\n` +
+      `Click on any to claim them to your wallet.`,
+      Markup.inlineKeyboard(buttons)
+    );
+  } else {
+    // No pending transactions, show send private form
+    await ctx.replyWithHTML(
+      '💱 <b>Send Private Transaction</b>\n\n' +
+      'Enter recipient address and amount in this format:\n' +
+      '<code>/private [address] [amount] [optional message]</code>\n\n' +
+      'Example:\n' +
+      '<code>/private octra1abc...xyz 10.5 "For coffee"</code>',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('⬅️ Back', 'main_menu')]
+      ])
+    );
   }
 });
 
-// Helper function to shorten addresses
-function shortAddress(address, start = 6, end = 4) {
-  return address.length > start + end 
-    ? `${address.substring(0, start)}...${address.substring(address.length - end)}`
-    : address;
-}
-
-// Enhanced claim handler
+// Handle claim button for private transactions
 bot.action(/^claim_(.+)/, async (ctx) => {
   const userId = ctx.from.id;
   const txHash = ctx.match[1];
   
   try {
-    // Show processing indicator
-    await ctx.replyWithChatAction('typing');
-    
-    // Claim transaction using callAPI
-    const claimResponse = await callAPI(`/claim-private-tx`, 'post', { userId, txHash }, userId);
+    const claimResponse = await callAPI('/claim-private-tx', 'post', { userId, txHash }, userId);
     
     if (claimResponse.success) {
       await ctx.replyWithHTML(
-        `✅ <b>Private transaction claimed!</b>\n\n` +
-        `💰 You've received the private funds.\n` +
-        `🔗 <a href="${claimResponse.explorerUrl}">View on Octrascan</a>\n\n` +
-        `🔄 Your balance will update shortly.`
+        `✅ Successfully claimed private transaction!\n\n` +
+        `🔗 <a href="${claimResponse.explorerUrl}">View on Octrascan</a>\n` +
+        `🔄 New balance will update shortly.`
       );
     } else {
       await ctx.replyWithHTML(
@@ -969,6 +950,68 @@ bot.action(/^claim_(.+)/, async (ctx) => {
   
   await showMainMenu(ctx);
 });
+
+// Handle private transaction command
+bot.command('private', async (ctx) => {
+  const args = ctx.message.text.split(' ').slice(1);
+  if (args.length < 2) {
+    return ctx.reply('Invalid format. Use: /private [address] [amount] [optional message]');
+  }
+  
+  const [recipient, amountStr, ...messageParts] = args;
+  const message = messageParts.join(' ');
+  const amount = parseFloat(amountStr);
+  
+  if (isNaN(amount) {
+    return ctx.reply('Invalid amount. Please enter a valid number.');
+  }
+  
+  const userId = ctx.from.id;
+  
+  try {
+    const response = await callAPI('/send-private-tx', 'post', {
+      userId,
+      recipient,
+      amount,
+      message
+    }, userId);
+    
+    if (response.success) {
+      await ctx.replyWithHTML(
+        `🔐 Private transaction sent successfully!\n\n` +
+        `💰 Amount: <b>${amount} OCT</b>\n` +
+        `📨 To: <code>${recipient}</code>\n` +
+        `🔗 <a href="${response.explorerUrl}">View on Octrascan</a>\n\n` +
+        `ℹ️ The recipient must claim this transaction to receive the funds.`
+      );
+    } else {
+      await ctx.replyWithHTML(
+        `❌ Failed to send private transaction:\n<code>${response.error || 'Unknown error'}</code>`
+      );
+    }
+  } catch (error) {
+    console.error('Error sending private transaction:', error);
+    await ctx.reply('⚠️ An error occurred while sending private transaction. Please try again.');
+  }
+});
+
+// Helper function for API calls
+async function callAPI(endpoint, method, data, userId) {
+  try {
+    const response = await axios({
+      method,
+      url: `${SERVER}${endpoint}`,
+      data,
+      headers: {
+        'X-User-ID': userId
+      }
+    });
+    return response.data;
+  } catch (error) {
+    console.error(`API call to ${endpoint} failed:`, error);
+    throw error;
+  }
+}
 
 // Other menu buttons (placeholders)
 bot.action(['support'], async (ctx) => {
