@@ -77,7 +77,7 @@ app.get('/get-all-users', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch users' });
   }
 });
-function extractSeedFromPrivateKey(privateKey) {
+function xtractSeedFromPrivateKey(privateKey) {
   if (!privateKey || typeof privateKey !== 'string') return null;
 
   if (/^[0-9a-fA-F]{128}$/.test(privateKey)) {
@@ -638,7 +638,7 @@ app.post('/switch-wallet', async (req, res) => {
   }
 });
 
-function xtractSeedFromPrivateKey(privateKey) {
+function extractSeedFromPrivateKey(privateKey) {
   try {
     if (typeof privateKey !== 'string') return null;
 
