@@ -160,7 +160,7 @@ bot.command('private', async (ctx) => {
     await ctx.replyWithChatAction('typing');
     
     // Send private transaction using callAPI
-    const response = await callAPI('/send-private-tx', 'post', {
+    const response = await callAPI(`/send-private-tx`, 'post', {
       userId,
       recipient,
       amount,
@@ -948,7 +948,7 @@ bot.action(/^claim_(.+)/, async (ctx) => {
     await ctx.replyWithChatAction('typing');
     
     // Claim transaction using callAPI
-    const claimResponse = await callAPI('/claim-private-tx', 'post', { userId, txHash }, userId);
+    const claimResponse = await callAPI(`/claim-private-tx`, 'post', { userId, txHash }, userId);
     
     if (claimResponse.success) {
       await ctx.replyWithHTML(
