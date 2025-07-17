@@ -145,7 +145,7 @@ bot.command('private', async (ctx) => {
   const message = messageParts.join(' ');
   const amount = parseFloat(amountStr);
   
-  if (isNaN(amount) {
+  if (isNaN(amount)) {
     return ctx.reply('Invalid amount. Please enter a valid number.');
   }
   
