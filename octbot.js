@@ -1,4 +1,3 @@
-
 const express = require('express');
 const axios = require('axios');
 require('dotenv').config();
@@ -276,7 +275,7 @@ async function showMainMenu(ctx) {
   await ctx.replyWithHTML(
     `👋 Welcome, <b>${username}</b>!\n\n` +
     `🔐 Your Octra Address:\n<code>${walletResponse.address}</code>\n\n` +
-    `💰 Balance: <b>${balanceInfo?.balance || "Octra Error you Can still send Though"} OCT</b>\n` +
+    `💰 Balance: <b>${balanceInfo?.balance || "RPC Error 🫆"} OCT</b>\n` +
     `⚡ Server: <b>${serverName}</b> (${speed}% speed)\n\n` +
     `👉 Join our <a href="https://chat.whatsapp.com/FREEb4qOVqKD38IAfA0wUA">WhatsApp Group</a>`,
     Markup.inlineKeyboard([
