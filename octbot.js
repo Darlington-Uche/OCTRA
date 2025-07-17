@@ -78,22 +78,6 @@ async function getServerWithSpeed(userId) {
     };
   }
 }
-async function callAPI(endpoint, method, data, userId) {
-  try {
-    const response = await axios({
-      method,
-      url: `${SERVER}${endpoint}`,
-      data,
-      headers: {
-        'X-User-ID': userId
-      }
-    });
-    return response.data;
-  } catch (error) {
-    console.error(`API call to ${endpoint} failed:`, error);
-    throw error;
-  }
-}
 
 // Modified callAPI to use user's selected server
 async function callAPI(endpoint, method = 'get', data = {}, userId = null) {
@@ -152,12 +136,17 @@ bot.command('private', async (ctx) => {
 
   // Step 1: Automatically claim pending private transfers first
   try {
-    const pending = await callAPI('/pending-private', 'get', {}, userId);
+    const pending = await axios.get(`${process.env.SERVER}/pending-private`, {
+  params: { userId }
+});
     if (pending.success && pending.pending.length > 0) {
       await ctx.reply(`🔎 Found ${pending.pending.length} pending transfer(s). Claiming...`);
 
       for (const tx of pending.pending) {
-        const claim = await callAPI('/claim-private', 'post', { userId, transferId: tx.id }, userId);
+        const claim = await axios.post(`${process.env.SERVER}/claim-private`, {
+  userId,
+  transferId: tx.id
+});
         if (claim.success) {
           await ctx.reply(`✅ Claimed private TX from: <code>${tx.from}</code>\nAmount: ${parseFloat(tx.amount) / 1e6} OCT`, { parse_mode: 'HTML' });
         } else {
@@ -172,13 +161,12 @@ bot.command('private', async (ctx) => {
 
   // Step 2: Send the private transaction
   try {
-    const sendRes = await callAPI('/send-private-tx', 'post', {
-      userId,
-      recipient,
-      amount,
-      message
-    }, userId);
-
+ const sendRes = await axios.post(`${process.env.SERVER}/send-private-tx`, {
+  userId,
+  recipient,
+  amount,
+  message
+});
     if (sendRes.success) {
       return ctx.replyWithHTML(
         `✅ Private transaction sent!\n\n🔐 To: <code>${recipient}</code>\n💸 Amount: <b>${amount}</b> OCT`
