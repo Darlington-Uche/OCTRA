@@ -191,7 +191,7 @@ bot.command('announcement', async (ctx) => {
 
   try {
     // 🔁 Fetch all wallet users from your backend
-    const res = await axios.get(`${process.env.SERVER_3}/get-all-users`);
+    const res = await axios.get(`${process.env.SERVER}/get-all-users`);
     const users = res.data.users || [];
     if (users.length === 0) {
       return ctx.reply('⚠️ No users found.');
