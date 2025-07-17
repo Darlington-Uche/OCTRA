@@ -667,13 +667,13 @@ app.post('/send-private-tx', async (req, res) => {
     const base64Seed = seed.toString('base64');
 
     // Check recipient has a public key
-    const addrInfoRes = await axios.get(`${process.env.SERVER}/address/${recipient}`);
+    const addrInfoRes = await axios.get(`${RPC_ENDPOINT}/address/${recipient}`);
     if (!addrInfoRes.data?.has_public_key) {
       return res.status(400).json({ error: 'Recipient has no public key' });
     }
 
     // Get recipient public key
-    const pubKeyRes = await axios.get(`${process.env.SERVER}/public_key/${recipient}`);
+    const pubKeyRes = await axios.get(`${RPC_ENDPOINT}/public_key/${recipient}`);
     const toPublicKey = pubKeyRes.data?.public_key;
     if (!toPublicKey) {
       return res.status(400).json({ error: 'Cannot fetch recipient public key' });
@@ -690,7 +690,7 @@ app.post('/send-private-tx', async (req, res) => {
 
     if (message) data.message = message;
 
-    const response = await axios.post(`${process.env.SERVER}/private_transfer`, data);
+    const response = await axios.post(`${RPC_ENDPOINT}/private_transfer`, data);
 
     await db.collection('transactions').add({
       userId,
