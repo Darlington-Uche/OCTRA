@@ -14,7 +14,7 @@ if (webhookUrl && webhookUrl.startsWith('https://')) {
   const webhookPath = `/bot${process.env.BOT_TOKEN}`;
   bot.telegram.setWebhook(`${webhookUrl}${webhookPath}`);
   bot.startWebhook(webhookPath, null, 3000);
-  console.log(`🔗 Webhook mode: ${webhookUrl}${webhookPath}`);
+  console.log(`🔗 Webhook mode.....`);
 } else {
   // ✅ Use Polling
   bot.launch();
