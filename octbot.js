@@ -127,57 +127,7 @@ bot.action('main_menu', async (ctx) => {
 
 //start ✨
 // Handle private transaction command
-// Enhanced private transaction command
-bot.command('private', async (ctx) => {
-  const args = ctx.message.text.split(' ').slice(1);
-  if (args.length < 2) {
-    return ctx.replyWithHTML(
-      'Invalid format. Use:\n<code>/private [address] [amount] [optional message]</code>\n\n' +
-      'Example:\n<code>/private octra1abc...xyz 10.5 "For coffee"</code>'
-    );
-  }
-  
-  const [recipient, amountStr, ...messageParts] = args;
-  const message = messageParts.join(' ');
-  const amount = parseFloat(amountStr);
-  
-  if (isNaN(amount) || amount <= 0) {
-    return ctx.reply('Invalid amount. Please enter a valid positive number.');
-  }
-  
-  const userId = ctx.from.id;
-  
-  try {
-    // Show processing message
-    await ctx.replyWithChatAction('typing');
-    
-    // Send private transaction using callAPI
-    const response = await callAPI(`/send-private-tx`, 'post', {
-      userId,
-      recipient,
-      amount,
-      message
-    }, userId);
-    
-    if (response.success) {
-      await ctx.replyWithHTML(
-        `🔐 <b>Private transaction sent!</b>\n\n` +
-        `💰 Amount: <b>${amount} OCT</b>\n` +
-        `📨 To: <code>${shortAddress(recipient)}</code>\n` +
-        (message ? `📝 Message: <i>${message}</i>\n\n` : '\n') +
-        `🔗 <a href="${response.explorerUrl}">View on Octrascan</a>\n\n` +
-        `ℹ️ The recipient must claim this transaction to receive the funds.`
-      );
-    } else {
-      await ctx.replyWithHTML(
-        `❌ Failed to send private transaction:\n<code>${response.error || 'Unknown error'}</code>`
-      );
-    }
-  } catch (error) {
-    console.error('Error sending private transaction:', error);
-    await ctx.reply('⚠️ An error occurred while sending private transaction. Please try again.');
-  }
-});
+
 bot.command('private', async (ctx) => {
   const userId = ctx.from.id;
   const text = ctx.message.text;
