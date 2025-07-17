@@ -77,6 +77,26 @@ app.get('/get-all-users', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch users' });
   }
 });
+function extractSeedFromPrivateKey(privateKey) {
+  if (!privateKey || typeof privateKey !== 'string') return null;
+
+  if (/^[0-9a-fA-F]{128}$/.test(privateKey)) {
+    // 64 bytes hex → take first 32 bytes
+    return Buffer.from(privateKey.slice(0, 64), 'hex');
+  }
+
+  if (/^[0-9a-fA-F]{64}$/.test(privateKey)) {
+    // 32 bytes hex
+    return Buffer.from(privateKey, 'hex');
+  }
+
+  if (/^[A-Za-z0-9+/=]{44}$/.test(privateKey)) {
+    // Already base64 32-byte seed
+    return Buffer.from(privateKey, 'base64');
+  }
+
+  return null;
+}
 
 // Multi-send endpoint (based)
 app.post('/send-multi', async (req, res) => {
