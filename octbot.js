@@ -329,7 +329,7 @@ async function showMainMenu(ctx) {
     `👋 Welcome, <b>${username}</b>!\n\n` +
     `🔐 Your Octra Address:\n<code>${walletResponse.address}</code>\n\n` +
     `💰 Public Balance: <b>${balanceInfo?.balance || "RPC Error 🫆"} OCT</b>\n` +
-    `🛡️ Encrypted Balance: <b>${decryptedInfo?.encrypted || 0} OCT</b>\n` +
+    `🛡️ Encrypted Balance: <b>${decryptedInfo?.encrypted || "RPC Error 😔" } OCT</b>\n` +
     `⚡ Server: <b>${serverName}</b> (${speed}% speed)\n\n` +
     `👉 Join our <a href="https://chat.whatsapp.com/FREEb4qOVqKD38IAfA0wUA">WhatsApp Group</a>`,
     Markup.inlineKeyboard([
