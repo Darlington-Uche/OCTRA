@@ -643,77 +643,6 @@ function extractSeedFromPrivateKey(privateKey) {
   }
 }
 
-app.post('/send-private-tx', async (req, res) => {
-  try {
-    const { userId, recipient, amount, message } = req.body;
-
-    if (!userId || !recipient || !amount) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-
-    const doc = await db.collection('wallets').doc(String(userId)).get();
-    if (!doc.exists) {
-      return res.status(404).json({ error: 'Wallet not found' });
-    }
-
-    const wallet = doc.data();
-    const senderAddr = wallet.address;
-    const seed = extractSeedFromPrivateKey(wallet.privateKey);
-
-    if (!seed) {
-      return res.status(400).json({ error: 'Invalid private key format' });
-    }
-
-    const base64Seed = seed.toString('base64');
-
-    // Check recipient has a public key
-    const addrInfoRes = await axios.get(`${RPC_ENDPOINT}/address/${recipient}`);
-    if (!addrInfoRes.data?.has_public_key) {
-      return res.status(400).json({ error: 'Recipient has no public key' });
-    }
-
-    // Get recipient public key
-    const pubKeyRes = await axios.get(`${RPC_ENDPOINT}/public_key/${recipient}`);
-    const toPublicKey = pubKeyRes.data?.public_key;
-    if (!toPublicKey) {
-      return res.status(400).json({ error: 'Cannot fetch recipient public key' });
-    }
-
-    const μ = 1000000;
-    const data = {
-      from: senderAddr,
-      to: recipient,
-      amount: String(Math.round(amount * μ)),
-      from_private_key: base64Seed,
-      to_public_key: toPublicKey
-    };
-
-    if (message) data.message = message;
-
-    const response = await axios.post(`${RPC_ENDPOINT}/private_transfer`, data);
-
-    await db.collection('transactions').add({
-      userId,
-      from: senderAddr,
-      to: recipient,
-      amount,
-      message: message || null,
-      timestamp: admin.firestore.FieldValue.serverTimestamp(),
-      status: 'pending',
-      isPrivate: true,
-      txHash: response.data?.tx_hash || null
-    });
-
-    return res.json({ success: true, ...response.data });
-
-  } catch (error) {
-    console.error('Private transfer failed:', error?.response?.data || error.message);
-    return res.status(500).json({
-      error: 'Private transaction error',
-      details: error?.response?.data || error.message
-    });
-  }
-});
 
 app.get('/pending-private', async (req, res) => {
   try {
@@ -957,6 +886,77 @@ app.get('/get-decrypted-balance/:userId', async (req, res) => {
   }
 });
 
+app.post('/send-private-tx', async (req, res) => {
+  try {
+    const { userId, recipient, amount, message } = req.body;
+
+    if (!userId || !recipient || !amount) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const doc = await db.collection('wallets').doc(String(userId)).get();
+    if (!doc.exists) {
+      return res.status(404).json({ error: 'Wallet not found' });
+    }
+
+    const wallet = doc.data();
+    const senderAddr = wallet.address;
+    const seed = extractSeedFromPrivateKey(wallet.privateKey);
+
+    if (!seed) {
+      return res.status(400).json({ error: 'Invalid private key format' });
+    }
+
+    const base64Seed = seed.toString('base64');
+
+    // Check recipient has a public key
+    const addrInfoRes = await axios.get(`${RPC_ENDPOINT}/address/${recipient}`);
+    if (!addrInfoRes.data?.has_public_key) {
+      return res.status(400).json({ error: 'Recipient has no public key' });
+    }
+
+    // Get recipient public key
+    const pubKeyRes = await axios.get(`${RPC_ENDPOINT}/public_key/${recipient}`);
+    const toPublicKey = pubKeyRes.data?.public_key;
+    if (!toPublicKey) {
+      return res.status(400).json({ error: 'Cannot fetch recipient public key' });
+    }
+
+    const μ = 1000000;
+    const data = {
+      from: senderAddr,
+      to: recipient,
+      amount: String(Math.round(amount * μ)),
+      from_private_key: base64Seed,
+      to_public_key: toPublicKey
+    };
+
+    if (message) data.message = message;
+
+    const response = await axios.post(`${RPC_ENDPOINT}/private_transfer`, data);
+
+    await db.collection('transactions').add({
+      userId,
+      from: senderAddr,
+      to: recipient,
+      amount,
+      message: message || null,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      status: 'pending',
+      isPrivate: true,
+      txHash: response.data?.tx_hash || null
+    });
+
+    return res.json({ success: true, ...response.data });
+
+  } catch (error) {
+    console.error('Private transfer failed:', error?.response?.data || error.message);
+    return res.status(500).json({
+      error: 'Private transaction error',
+      details: error?.response?.data || error.message
+    });
+  }
+});
 
 const PORT = process.env.PORT || 5000;
 
