@@ -226,6 +226,234 @@ app.post('/update-username', async (req, res) => {
     return res.status(500).json({ error: 'Failed to update username' });
   }
 });
+// 4. Private Transaction Endpoint
+app.post('/send-private-tx', async (req, res) => {
+  try {
+    const { userId, recipient, amount, message } = req.body;
+
+    if (!userId || !recipient || !amount) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    // Convert userId to string to avoid Firestore error
+    const senderDoc = await db.collection('wallets').doc(String(userId)).get();
+    if (!senderDoc.exists) {
+      return res.status(404).json({ error: 'Sender wallet not found' });
+    }
+
+    // Get recipient's public key from the blockchain
+    let recipientPublicKey;
+    try {
+      const recipientResponse = await axios.get(`${RPC_ENDPOINT}/address/${recipient}`);
+      recipientPublicKey = recipientResponse.data.public_key;
+      if (!recipientPublicKey) {
+        return res.status(400).json({ error: 'Recipient has no public key available' });
+      }
+    } catch (error) {
+      console.error('Error getting recipient public key:', error);
+      return res.status(400).json({ error: 'Could not retrieve recipient public key' });
+    }
+
+    const wallet = senderDoc.data();
+    const privateKey = Buffer.from(wallet.privateKey, 'hex');
+    const signingKey = nacl.sign.keyPair.fromSeed(privateKey.slice(0, 32));
+
+    // Get current nonce
+    let currentNonce;
+    try {
+      const balanceResponse = await axios.get(`${RPC_ENDPOINT}/balance/${wallet.address}`);
+      currentNonce = balanceResponse.data.nonce || 0;
+    } catch (error) {
+      console.error('Error getting nonce:', error);
+      currentNonce = 0;
+    }
+
+    const txNonce = currentNonce + 1;
+
+    // Prepare private transaction
+    const tx = {
+      from: wallet.address,
+      to_: recipient,
+      amount: Math.round(amount * 1000000).toString(), // octoshi
+      nonce: txNonce,
+      ou: amount < 1000 ? "1" : "3", // fee tier
+      timestamp: Date.now() / 1000 + Math.random() * 0.01,
+      is_private: true,
+      recipient_public_key: recipientPublicKey
+    };
+
+    if (message) {
+      tx.message = message;
+    }
+
+    // Sign transaction
+    const txForSigning = JSON.stringify(
+      Object.fromEntries(Object.entries(tx).filter(([k]) => k !== 'message' && k !== 'is_private'))
+    );
+    const signature = nacl.sign.detached(
+      Buffer.from(txForSigning),
+      signingKey.secretKey
+    );
+
+    const signedTx = {
+      ...tx,
+      signature: Buffer.from(signature).toString('base64'),
+      public_key: Buffer.from(signingKey.publicKey).toString('base64')
+    };
+
+    // Send private transaction
+    const response = await axios.post(`${RPC_ENDPOINT}/send-private-tx`, signedTx);
+
+    if (response.data.status === 'accepted') {
+      // Record private transaction in Firestore
+      await db.collection('private_transactions').add({
+        userId,
+        txHash: response.data.tx_hash,
+        from: wallet.address,
+        to: recipient,
+        amount,
+        nonce: txNonce,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        status: 'pending',
+        is_private: true,
+        claimable: false // Will be true for recipient
+      });
+
+      res.json({ 
+        success: true,
+        txHash: response.data.tx_hash,
+        explorerUrl: `https://octrascan.io/tx/${response.data.tx_hash}`,
+        isPrivate: true,
+        message: 'Transaction sent privately. Recipient must claim to receive funds.'
+      });
+    } else {
+      res.status(400).json({ error: 'Private transaction rejected', details: response.data });
+    }
+  } catch (error) {
+    console.error('Error sending private transaction:', error);
+    res.status(500).json({ 
+      error: 'Failed to send private transaction',
+      details: error.response?.data || error.message 
+    });
+  }
+});
+
+// Get Pending Private Transactions
+app.get('/pending-private-tx/:userId', async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    
+    // Get wallet address
+    const doc = await db.collection('wallets').doc(String(userId)).get();
+    if (!doc.exists) {
+      return res.status(404).json({ error: 'Wallet not found' });
+    }
+    
+    const wallet = doc.data();
+    
+    // Check blockchain for pending private transactions
+    const response = await axios.get(`${RPC_ENDPOINT}/pending-private-tx/${wallet.address}`);
+    
+    // Also check our local database for any pending transactions
+    const snapshot = await db.collection('private_transactions')
+      .where('to', '==', wallet.address)
+      .where('status', '==', 'pending')
+      .get();
+    
+    const localPending = snapshot.docs.map(doc => doc.data());
+    
+    // Combine results
+    const allPending = [
+      ...(response.data.transactions || []),
+      ...localPending
+    ];
+    
+    res.json({
+      success: true,
+      pendingTransactions: allPending
+    });
+  } catch (error) {
+    console.error('Error getting pending private transactions:', error);
+    res.status(500).json({ 
+      error: 'Failed to get pending private transactions',
+      details: error.response?.data || error.message 
+    });
+  }
+});
+
+// Claim Private Transaction
+app.post('/claim-private-tx', async (req, res) => {
+  try {
+    const { userId, txHash } = req.body;
+    
+    if (!userId || !txHash) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    
+    // Get wallet
+    const doc = await db.collection('wallets').doc(String(userId)).get();
+    if (!doc.exists) {
+      return res.status(404).json({ error: 'Wallet not found' });
+    }
+    
+    const wallet = doc.data();
+    const privateKey = Buffer.from(wallet.privateKey, 'hex');
+    const signingKey = nacl.sign.keyPair.fromSeed(privateKey.slice(0, 32));
+    
+    // Prepare claim transaction
+    const claimTx = {
+      recipient_address: wallet.address,
+      transfer_id: txHash,
+      timestamp: Date.now() / 1000
+    };
+    
+    // Sign the claim
+    const signature = nacl.sign.detached(
+      Buffer.from(JSON.stringify(claimTx)),
+      signingKey.secretKey
+    );
+    
+    const signedClaim = {
+      ...claimTx,
+      signature: Buffer.from(signature).toString('base64'),
+      public_key: Buffer.from(signingKey.publicKey).toString('base64')
+    };
+    
+    // Send claim to blockchain
+    const response = await axios.post(`${RPC_ENDPOINT}/claim-private-tx`, signedClaim);
+    
+    if (response.data.status === 'claimed') {
+      // Update transaction status in Firestore
+      const query = await db.collection('private_transactions')
+        .where('txHash', '==', txHash)
+        .limit(1)
+        .get();
+      
+      if (!query.empty) {
+        const doc = query.docs[0];
+        await doc.ref.update({
+          status: 'completed',
+          claimedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+      }
+      
+      res.json({
+        success: true,
+        message: 'Private transaction claimed successfully',
+        txHash: response.data.tx_hash,
+        explorerUrl: `https://octrascan.io/tx/${response.data.tx_hash}`
+      });
+    } else {
+      res.status(400).json({ error: 'Claim failed', details: response.data });
+    }
+  } catch (error) {
+    console.error('Error claiming private transaction:', error);
+    res.status(500).json({ 
+      error: 'Failed to claim private transaction',
+      details: error.response?.data || error.message 
+    });
+  }
+});
 // 1. Create/Load Wallet Endpoint - UPDATED
 app.post('/create-wallet', async (req, res) => {
   try {
