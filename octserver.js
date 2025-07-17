@@ -642,9 +642,10 @@ function xtractSeedFromPrivateKey(privateKey) {
     return null;
   }
 }
+
 app.post('/send-private-tx', async (req, res) => {
   try {
-    const { userId, recipient, amount } = req.body;
+    const { userId, recipient, amount, message } = req.body;
 
     if (!userId || !recipient || !amount) {
       return res.status(400).json({ error: 'Missing required fields' });
@@ -657,85 +658,57 @@ app.post('/send-private-tx', async (req, res) => {
 
     const wallet = doc.data();
     const senderAddr = wallet.address;
-    const privateKeyHex = wallet.privateKey;
-    const seed = xtractSeedFromPrivateKey(privateKeyHex);
+    const seed = extractSeedFromPrivateKey(wallet.privateKey);
 
     if (!seed) {
       return res.status(400).json({ error: 'Invalid private key format' });
     }
 
-    const privateKeyBase64 = seed.toString('base64');
-    const μ = 1_000_000;
-    const amountRaw = Math.round((amount + 0.1) * μ); // includes +0.1 OCT gas
+    const base64Seed = seed.toString('base64');
 
-    // 1. Check if recipient has a public key
-    const addrInfoRes = await axios.get(`${RPC_ENDPOINT}/address/${recipient}`);
+    // Check recipient has a public key
+    const addrInfoRes = await axios.get(`${process.env.SERVER}/address/${recipient}`);
     if (!addrInfoRes.data?.has_public_key) {
       return res.status(400).json({ error: 'Recipient has no public key' });
     }
 
-    // 2. Get encrypted balance
-    const balanceRes = await axios.get(`${RPC_ENDPOINT}/view_encrypted_balance/${senderAddr}`, {
-      headers: { 'X-Private-Key': privateKeyBase64 }
-    });
-
-    const currentEncryptedRaw = parseInt(balanceRes.data?.encrypted_balance_raw || '0');
-    const newEncryptedRaw = currentEncryptedRaw + amountRaw;
-
-    // 3. Locally generate encrypted_data for new balance
-    const salt = Buffer.from('octra_encrypted_balance_v2');
-    const key = crypto.createHash('sha256').update(Buffer.concat([salt, seed])).digest().slice(0, 32);
-    const nonce = crypto.randomBytes(12);
-    const plaintext = Buffer.from(newEncryptedRaw.toString());
-
-    const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce);
-    const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-    const tag = cipher.getAuthTag();
-
-    const encryptedData = Buffer.concat([nonce, ciphertext, tag]);
-    const encryptedBalanceValue = 'v2|' + encryptedData.toString('base64');
-
-    // 4. Encrypt balance remotely
-    await axios.post(`${RPC_ENDPOINT}/encrypt_balance`, {
-      address: senderAddr,
-      amount: String(amountRaw),
-      private_key: privateKeyBase64,
-      encrypted_data: encryptedBalanceValue
-    });
-
-    // 5. Get recipient public key
-    const pubKeyRes = await axios.get(`${RPC_ENDPOINT}/public_key/${recipient}`);
+    // Get recipient public key
+    const pubKeyRes = await axios.get(`${process.env.SERVER}/public_key/${recipient}`);
     const toPublicKey = pubKeyRes.data?.public_key;
     if (!toPublicKey) {
       return res.status(400).json({ error: 'Cannot fetch recipient public key' });
     }
 
-    // 6. Send the private transfer
-    const transferRes = await axios.post(`${RPC_ENDPOINT}/private_transfer`, {
+    const μ = 1000000;
+    const data = {
       from: senderAddr,
       to: recipient,
-      amount: String(Math.round(amount * μ)), // actual amount sent
-      from_private_key: privateKeyBase64,
+      amount: String(Math.round(amount * μ)),
+      from_private_key: base64Seed,
       to_public_key: toPublicKey
-    });
+    };
 
-    // 7. Store in Firestore
+    if (message) data.message = message;
+
+    const response = await axios.post(`${process.env.SERVER}/private_transfer`, data);
+
     await db.collection('transactions').add({
       userId,
       from: senderAddr,
       to: recipient,
       amount,
+      message: message || null,
       timestamp: admin.firestore.FieldValue.serverTimestamp(),
       status: 'pending',
       isPrivate: true,
-      txHash: transferRes.data?.tx_hash || null
+      txHash: response.data?.tx_hash || null
     });
 
-    res.json({ success: true, ...transferRes.data });
+    return res.json({ success: true, ...response.data });
 
   } catch (error) {
     console.error('Private transfer failed:', error?.response?.data || error.message);
-    res.status(500).json({
+    return res.status(500).json({
       error: 'Private transaction error',
       details: error?.response?.data || error.message
     });
@@ -793,6 +766,198 @@ app.post('/claim-private', async (req, res) => {
     res.status(500).json({ error: 'Claim failed', details: error?.response?.data || error.message });
   }
 });
+
+app.post('/encrypt-balance', async (req, res) => {
+  try {
+    const { userId, amount } = req.body;
+
+    if (!userId || !amount || isNaN(amount)) {
+      return res.status(400).json({ error: 'Missing or invalid userId or amount' });
+    }
+
+    const doc = await db.collection('wallets').doc(String(userId)).get();
+    if (!doc.exists) {
+      return res.status(404).json({ error: 'Wallet not found' });
+    }
+
+    const wallet = doc.data();
+    const seed = extractSeedFromPrivateKey(wallet.privateKey);
+    if (!seed) {
+      return res.status(400).json({ error: 'Invalid private key format' });
+    }
+
+    const privateKeyBase64 = seed.toString('base64');
+    const μ = 1_000_000;
+    const addAmountRaw = Math.round(amount * μ);
+
+    // Fetch current encrypted balance
+    const balanceRes = await axios.get(`${RPC_ENDPOINT}/view_encrypted_balance/${wallet.address}`, {
+      headers: { 'X-Private-Key': privateKeyBase64 }
+    });
+
+    const currentRaw = parseInt(balanceRes.data?.encrypted_balance_raw || '0');
+    const newRaw = currentRaw + addAmountRaw;
+
+    // Derive AES-GCM key and encrypt new balance
+    const salt = Buffer.from('octra_encrypted_balance_v2');
+    const key = crypto.createHash('sha256').update(Buffer.concat([salt, seed])).digest().slice(0, 32);
+
+    const nonce = crypto.randomBytes(12);
+    const plaintext = Buffer.from(newRaw.toString());
+
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce);
+    const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+    const tag = cipher.getAuthTag();
+
+    const encryptedData = Buffer.concat([nonce, ciphertext, tag]);
+    const encryptedBalanceValue = 'v2|' + encryptedData.toString('base64');
+
+    // Send to RPC
+    const encRes = await axios.post(`${RPC_ENDPOINT}/encrypt_balance`, {
+      address: wallet.address,
+      amount: String(addAmountRaw),
+      private_key: privateKeyBase64,
+      encrypted_data: encryptedBalanceValue
+    });
+
+    return res.json({ success: true, result: encRes.data });
+  } catch (err) {
+    console.error('Encrypt balance error:', err?.response?.data || err.message);
+    return res.status(500).json({ error: 'Encrypt failed', details: err?.response?.data || err.message });
+  }
+});
+
+app.post('/decrypt-balance', async (req, res) => {
+  try {
+    const { userId, amount } = req.body;
+
+    if (!userId || !amount || isNaN(amount)) {
+      return res.status(400).json({ error: 'Missing or invalid userId or amount' });
+    }
+
+    const doc = await db.collection('wallets').doc(String(userId)).get();
+    if (!doc.exists) {
+      return res.status(404).json({ error: 'Wallet not found' });
+    }
+
+    const wallet = doc.data();
+    const seed = extractSeedFromPrivateKey(wallet.privateKey);
+    if (!seed) {
+      return res.status(400).json({ error: 'Invalid private key format' });
+    }
+
+    const privateKeyBase64 = seed.toString('base64');
+    const μ = 1_000_000;
+    const subtractRaw = Math.round(amount * μ);
+
+    // Fetch encrypted balance
+    const balanceRes = await axios.get(`${RPC_ENDPOINT}/view_encrypted_balance/${wallet.address}`, {
+      headers: { 'X-Private-Key': privateKeyBase64 }
+    });
+
+    const currentRaw = parseInt(balanceRes.data?.encrypted_balance_raw || '0');
+    if (currentRaw < subtractRaw) {
+      return res.status(400).json({ error: 'Insufficient encrypted balance' });
+    }
+
+    const newRaw = currentRaw - subtractRaw;
+
+    // Encrypt the new state
+    const salt = Buffer.from('octra_encrypted_balance_v2');
+    const key = crypto.createHash('sha256').update(Buffer.concat([salt, seed])).digest().slice(0, 32);
+
+    const nonce = crypto.randomBytes(12);
+    const plaintext = Buffer.from(newRaw.toString());
+
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce);
+    const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+    const tag = cipher.getAuthTag();
+
+    const encryptedData = Buffer.concat([nonce, ciphertext, tag]);
+    const encryptedBalanceValue = 'v2|' + encryptedData.toString('base64');
+
+    // Send to RPC
+    const decRes = await axios.post(`${RPC_ENDPOINT}/decrypt_balance`, {
+      address: wallet.address,
+      amount: String(subtractRaw),
+      private_key: privateKeyBase64,
+      encrypted_data: encryptedBalanceValue
+    });
+
+    return res.json({ success: true, result: decRes.data });
+  } catch (err) {
+    console.error('Decrypt balance error:', err?.response?.data || err.message);
+    return res.status(500).json({ error: 'Decrypt failed', details: err?.response?.data || err.message });
+  }
+});
+app.get('/get-decrypted-balance/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // Get wallet
+    const doc = await db.collection('wallets').doc(String(userId)).get();
+    if (!doc.exists) {
+      return res.status(404).json({ error: 'Wallet not found' });
+    }
+
+    const wallet = doc.data();
+    const privateKeyHex = wallet.privateKey;
+    const seed = extractSeedFromPrivateKey(privateKeyHex);
+
+    if (!seed) {
+      return res.status(400).json({ error: 'Invalid private key format' });
+    }
+
+    const privateKeyBase64 = seed.toString('base64');
+    const address = wallet.address;
+
+    // Fetch encrypted balance
+    const response = await axios.get(`${RPC_ENDPOINT}/view_encrypted_balance/${address}`, {
+      headers: { 'X-Private-Key': privateKeyBase64 }
+    });
+
+    const encryptedData = response.data?.encrypted_balance_raw;
+    if (!encryptedData || isNaN(encryptedData)) {
+      return res.status(200).json({ encrypted: 0 });
+    }
+
+    // Decrypt locally
+    const salt = Buffer.from('octra_encrypted_balance_v2');
+    const key = crypto.createHash('sha256').update(Buffer.concat([salt, seed])).digest().slice(0, 32);
+
+    const rawEncoded = response.data?.encrypted_balance;
+    if (!rawEncoded || !rawEncoded.startsWith('v2|')) {
+      return res.status(200).json({ encrypted: 0 });
+    }
+
+    try {
+      const b64 = rawEncoded.slice(3);
+      const buffer = Buffer.from(b64, 'base64');
+      const nonce = buffer.slice(0, 12);
+      const ciphertext = buffer.slice(12);
+
+      const decipher = crypto.createDecipheriv('aes-256-gcm', key, nonce);
+      decipher.setAuthTag(ciphertext.slice(-16));
+
+      const decrypted = Buffer.concat([
+        decipher.update(ciphertext.slice(0, -16)),
+        decipher.final()
+      ]);
+
+      const decryptedAmount = parseInt(decrypted.toString());
+      return res.json({ encrypted: decryptedAmount / 1_000_000 }); // return OCT not μ
+    } catch (e) {
+      console.error('Decryption failed:', e);
+      return res.status(200).json({ encrypted: 0 });
+    }
+
+  } catch (err) {
+    console.error('Decrypted balance fetch error:', err?.response?.data || err.message);
+    return res.status(500).json({ error: 'Failed to fetch decrypted balance' });
+  }
+});
+
+
 const PORT = process.env.PORT || 5000;
 
 // 🩺 Health Check Endpoint
