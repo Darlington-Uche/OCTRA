@@ -618,7 +618,7 @@ app.post('/switch-wallet', async (req, res) => {
   }
 });
 
-function xtractSeedFromPrivateKey(privateKey) {
+function extractSeedFromPrivateKey(privateKey) {
   try {
     if (typeof privateKey !== 'string') return null;
 
