@@ -78,6 +78,23 @@ async function getServerWithSpeed(userId) {
     };
   }
 }
+async function callAPI(endpoint, method, data, userId) {
+  try {
+    const response = await axios({
+      method,
+      url: `${SERVER}${endpoint}`,
+      data,
+      headers: {
+        'X-User-ID': userId
+      }
+    });
+    return response.data;
+  } catch (error) {
+    console.error(`API call to ${endpoint} failed:`, error);
+    throw error;
+  }
+}
+
 // Modified callAPI to use user's selected server
 async function callAPI(endpoint, method = 'get', data = {}, userId = null) {
   try {
@@ -962,7 +979,7 @@ bot.command('private', async (ctx) => {
   const message = messageParts.join(' ');
   const amount = parseFloat(amountStr);
   
-  if (isNaN(amount) {
+  if (isNaN(amount)) {
     return ctx.reply('Invalid amount. Please enter a valid number.');
   }
   
@@ -996,22 +1013,6 @@ bot.command('private', async (ctx) => {
 });
 
 // Helper function for API calls
-async function callAPI(endpoint, method, data, userId) {
-  try {
-    const response = await axios({
-      method,
-      url: `${SERVER}${endpoint}`,
-      data,
-      headers: {
-        'X-User-ID': userId
-      }
-    });
-    return response.data;
-  } catch (error) {
-    console.error(`API call to ${endpoint} failed:`, error);
-    throw error;
-  }
-}
 
 // Other menu buttons (placeholders)
 bot.action(['support'], async (ctx) => {
