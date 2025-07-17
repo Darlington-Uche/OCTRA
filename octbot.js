@@ -123,7 +123,7 @@ bot.command('encrypt', async (ctx) => {
   }
 
   try {
-    const response = await callAPI('/encrypt', 'post', { userId, amount }, userId);
+    const response = await callAPI('/encrypt-balance', 'post', { userId, amount }, userId);
     if (response.success) {
       return ctx.reply(`🔐 Encrypted ${amount} OCT successfully.`);
     } else {
@@ -149,7 +149,7 @@ bot.command('decrypt', async (ctx) => {
   }
 
   try {
-    const response = await callAPI('/decrypt', 'post', { userId, amount }, userId);
+    const response = await callAPI('/decrypt-balance', 'post', { userId, amount }, userId);
     if (response.success) {
       return ctx.reply(`🔓 Decrypted ${amount} OCT successfully.`);
     } else {
