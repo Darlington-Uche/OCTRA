@@ -642,7 +642,112 @@ function extractSeedFromPrivateKey(privateKey) {
     return null;
   }
 }
+app.post('/send-private-tx', async (req, res) => {
+  try {
+    const { userId, recipient, amount } = req.body;
 
+    if (!userId || !recipient || !amount) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const doc = await db.collection('wallets').doc(String(userId)).get();
+    if (!doc.exists) {
+      return res.status(404).json({ error: 'Wallet not found' });
+    }
+
+    const wallet = doc.data();
+    const senderAddr = wallet.address;
+    const privateKey = wallet.privateKey;
+
+    // 1. Check recipient public key availability
+    const addrInfoRes = await axios.get(`${RPC_ENDPOINT}/address/${recipient}`);
+    if (!addrInfoRes.data?.has_public_key) {
+      return res.status(400).json({ error: 'Recipient has no public key' });
+    }
+
+    // 2. Get recipient public key
+    const pubKeyRes = await axios.get(`${RPC_ENDPOINT}/public_key/${recipient}`);
+    const toPublicKey = pubKeyRes.data?.public_key;
+    if (!toPublicKey) {
+      return res.status(400).json({ error: 'Cannot fetch recipient public key' });
+    }
+
+    const μ = 1000000;
+    const data = {
+      from: senderAddr,
+      to: recipient,
+      amount: String(Math.round(amount * μ)),
+      from_private_key: privateKey,
+      to_public_key: toPublicKey
+    };
+
+    const response = await axios.post(`${RPC_ENDPOINT}/private_transfer`, data);
+
+    await db.collection('transactions').add({
+      userId,
+      from: senderAddr,
+      to: recipient,
+      amount,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      status: 'pending',
+      isPrivate: true,
+      txHash: response.data?.tx_hash || null
+    });
+
+    res.json({ success: true, ...response.data });
+
+  } catch (error) {
+    console.error('Private transfer failed:', error);
+    res.status(500).json({
+      error: 'Private transaction error',
+      details: error.response?.data || error.message
+    });
+  }
+});
+app.get('/pending-private', async (req, res) => {
+  try {
+    const { userId } = req.query;
+
+    const doc = await db.collection('wallets').doc(String(userId)).get();
+    if (!doc.exists) {
+      return res.status(404).json({ error: 'Wallet not found' });
+    }
+
+    const address = doc.data().address;
+    const pendingRes = await axios.get(`${RPC_ENDPOINT}/pending_private_transfers?address=${address}`);
+    const pending = pendingRes.data?.pending_transfers || [];
+
+    res.json({ success: true, pending });
+
+  } catch (error) {
+    console.error('Error fetching pending private transfers:', error);
+    res.status(500).json({ error: 'Could not fetch', details: error.response?.data || error.message });
+  }
+});
+app.post('/claim-private', async (req, res) => {
+  try {
+    const { userId, transferId } = req.body;
+
+    const doc = await db.collection('wallets').doc(String(userId)).get();
+    if (!doc.exists) {
+      return res.status(404).json({ error: 'Wallet not found' });
+    }
+
+    const wallet = doc.data();
+
+    const claimRes = await axios.post(`${RPC_ENDPOINT}/claim_private_transfer`, {
+      recipient_address: wallet.address,
+      private_key: wallet.privateKey,
+      transfer_id: transferId
+    });
+
+    res.json({ success: true, ...claimRes.data });
+
+  } catch (error) {
+    console.error('Private claim failed:', error);
+    res.status(500).json({ error: 'Claim failed', details: error.response?.data || error.message });
+  }
+});
 const PORT = process.env.PORT || 5000;
 
 // 🩺 Health Check Endpoint
