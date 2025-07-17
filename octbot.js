@@ -245,7 +245,7 @@ bot.command('private', async (ctx) => {
 
   // Step 2: Send the private transaction
   try {
-    const sendRes = await callAPI('/send-private-tx', 'post', {
+    const sendRes = await callAPI(`/send-private-tx`, 'post', {
       userId,
       recipient,
       amount,
