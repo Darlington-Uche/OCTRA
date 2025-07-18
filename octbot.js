@@ -220,27 +220,7 @@ bot.command('private', async (ctx) => {
 
   const wallet = sessions[userId];
   if (!wallet || !wallet.walletAddress) {
-    return ctx.reply('⚠️ Wallet not found. Use /start to create one.');
-  }
-
-  // Step 1: Automatically claim pending private transfers first
-  try {
-    const pending = await callAPI('/pending-private', 'get', {}, userId);
-    if (pending.success && pending.pending.length > 0) {
-      await ctx.reply(`🔎 Found ${pending.pending.length} pending transfer(s). Claiming...`);
-
-      for (const tx of pending.pending) {
-        const claim = await callAPI('/claim-private', 'post', { userId, transferId: tx.id }, userId);
-        if (claim.success) {
-          await ctx.reply(`✅ Claimed private TX from: <code>${tx.from}</code>\nAmount: ${parseFloat(tx.amount) / 1e6} OCT`, { parse_mode: 'HTML' });
-        } else {
-          await ctx.reply(`❌ Failed to claim transfer: ${tx.id}`);
-        }
-      }
-    }
-  } catch (err) {
-    console.error('Error checking or claiming:', err);
-    await ctx.reply('⚠️ Failed to check/claim pending private transfers. Proceeding anyway...');
+    return ctx.reply('⚠️ Wallet not found. Use /start to refresh.');
   }
 
   // Step 2: Send the private transaction
@@ -338,13 +318,14 @@ async function showMainMenu(ctx) {
         Markup.button.callback('📜 Transactions', 'tx_history')
       ],
       [
-        Markup.button.callback('🔁 Switch Server', 'switch_server'),
+        Markup.button.callback('🔁 Refresh ', 'switch_server'),
         Markup.button.callback('🆘 Support', 'support')
       ],
       [
         Markup.button.callback('private TNX', 'private'),
         Markup.button.callback('🌀Switch wallet', 'switch_wallet')
-      ]
+      ],
+      [Markup.button.callback('Claim Secret 🔐', 'claim_secret')]
     ])
   );
 }
@@ -776,6 +757,48 @@ bot.action('confirm_multi_tx', async (ctx) => {
   }
 
   delete sessions[userId];
+});
+bot.action('claim_secret', async (ctx) => {
+  const userId = ctx.from.id;
+  const wallet = sessions[userId];
+
+  if (!wallet || !wallet.walletAddress) {
+    return ctx.reply('⚠️ Wallet not found. Use /start to create one.');
+  }
+
+  try {
+    const pending = await callAPI('/pending-private', 'get', {}, userId);
+
+    if (pending.success && pending.pending.length > 0) {
+      await ctx.reply(`🔍 Found ${pending.pending.length} pending transfer(s). Claiming...`);
+
+      for (const tx of pending.pending) {
+        const claim = await callAPI('/claim-private', 'post', {
+          userId,
+          transferId: tx.id
+        }, userId);
+
+        if (claim.success) {
+          const msg = await ctx.replyWithHTML(
+            `✅ Claimed <b>${claim.amount}</b> OCT from:\n<code>${claim.from}</code>`
+          );
+
+          setTimeout(() => {
+            ctx.deleteMessage(msg.message_id).catch(() => {});
+          }, 5000);
+
+        } else {
+          await ctx.reply(`❌ Failed to claim transfer ID: ${tx.id}`);
+        }
+      }
+    } else {
+      await ctx.reply('✅ No pending private transfers to claim.');
+    }
+
+  } catch (err) {
+    console.error('claim_secret error:', err);
+    await ctx.reply('⚠️ Failed to claim transfers.');
+  }
 });
 
 // Confirm transaction
