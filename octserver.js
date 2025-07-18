@@ -383,18 +383,23 @@ app.post('/send-tx', async (req, res) => {
 
     const signingKey = nacl.sign.keyPair.fromSeed(seed);
 
-    // === Get nonce using safe local endpoint
-    let currentNonce = 0;
-    try {
-      const balanceRes = await axios.get(`${RPC_ENDPOINT}/get-balance/${wallet.address}`);
-      currentNonce = parseInt(balanceRes.data?.nonce ?? 0);
-    } catch (err) {
-      console.error('❌ Failed to fetch nonce:', err.response?.data || err.message);
-      return res.status(500).json({ error: 'Unable to fetch current nonce' });
-    }
+    // === Get nonce directly from Octra RPC
+let currentNonce = 0;
+try {
+  const res = await axios.get(`${RPC_ENDPOINT}/balance/${wallet.address}`);
 
-    const nonce = currentNonce + 1;
+  if (typeof res.data === 'object') {
+    currentNonce = parseInt(res.data?.nonce ?? 0);
+  } else {
+    const parts = String(res.data).trim().split(/\s+/);
+    currentNonce = parseInt(parts[1]) || 0;
+  }
+} catch (err) {
+  console.error('❌ Failed to fetch nonce from Octra RPC:', err.response?.data || err.message);
+  return res.status(500).json({ error: 'Unable to fetch nonce from Octra RPC' });
+}
 
+const nonce = currentNonce + 1;
     // === Build transaction
     const tx = {
       from: wallet.address,
