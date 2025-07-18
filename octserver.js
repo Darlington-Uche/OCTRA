@@ -673,17 +673,36 @@ app.get('/pending-private', async (req, res) => {
       return res.status(404).json({ error: 'Wallet not found' });
     }
 
-    const address = doc.data().address;
-    const pendingRes = await axios.get(`${RPC_ENDPOINT}/pending_private_transfers?address=${address}`);
-    const pending = pendingRes.data?.pending_transfers || [];
+    const wallet = doc.data();
+    const seed = xtractSeedFromPrivateKey(wallet.privateKey);
+    if (!seed) {
+      return res.status(400).json({ error: 'Invalid private key format' });
+    }
 
+    const base64Seed = seed.toString('base64');
+    const address = wallet.address;
+
+    const pendingRes = await axios.get(
+      `${RPC_ENDPOINT}/pending_private_transfers?address=${address}`,
+      {
+        headers: {
+          'X-Private-Key': base64Seed
+        }
+      }
+    );
+
+    const pending = pendingRes.data?.pending_transfers || [];
     res.json({ success: true, pending });
 
   } catch (error) {
-    console.error('Error fetching pending private transfers:', error);
-    res.status(500).json({ error: 'Could not fetch', details: error.response?.data || error.message });
+    console.error('Error fetching pending private transfers:', error?.response?.data || error.message);
+    res.status(500).json({
+      error: 'Could not fetch',
+      details: error?.response?.data || error.message
+    });
   }
 });
+
 app.post('/claim-private', async (req, res) => {
   try {
     const { userId, transferId } = req.body;
@@ -695,7 +714,6 @@ app.post('/claim-private', async (req, res) => {
 
     const wallet = doc.data();
     const seed = xtractSeedFromPrivateKey(wallet.privateKey);
-
     if (!seed) {
       return res.status(400).json({ error: 'Invalid private key format' });
     }
@@ -708,11 +726,11 @@ app.post('/claim-private', async (req, res) => {
       transfer_id: transferId
     });
 
-    res.json({ success: true, ...claimRes.data });
+    return res.json({ success: true, ...claimRes.data });
 
   } catch (error) {
     console.error('Private claim failed:', error?.response?.data || error.message);
-    res.status(500).json({ error: 'Claim failed', details: error?.response?.data || error.message });
+    return res.status(500).json({ error: 'Claim failed', details: error?.response?.data || error.message });
   }
 });
 
