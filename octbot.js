@@ -767,7 +767,7 @@ bot.action('claim_secret', async (ctx) => {
   }
 
   try {
-    const pending = await callAPI('/pending-private', 'get', {}, userId);
+    const pending = await callAPI('/pending-private', 'get', { userId }, userId);
 
     if (pending.success && pending.pending.length > 0) {
       await ctx.reply(`🔍 Found ${pending.pending.length} pending transfer(s). Claiming...`);
