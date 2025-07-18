@@ -866,11 +866,14 @@ app.get('/get-decrypted-balance/:userId', async (req, res) => {
 
     const rpcUrl = `https://octra.network/view_encrypted_balance/${address}`;
     console.log(`→ Calling RPC: ${rpcUrl}`);
+console.log(`→ Sending Header 'X-Private-Key': ${privateKeyBase64}`);
 
-    const response = await axios.get(rpcUrl, {
-      headers: { 'X-Private-Key': privateKeyBase64 },
-      timeout: 5000
-    });
+    const response = await axios.get(`https://octra.network/view_encrypted_balance/${address}`, {
+  headers: {
+    'X-Private-Key': privateKeyBase64.trim()
+  },
+  timeout: 5000
+});
 
     const { encrypted_balance } = response.data;
 
