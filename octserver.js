@@ -843,60 +843,68 @@ app.get('/get-decrypted-balance/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
 
-    // Get wallet
+    // Fetch wallet from Firestore
     const doc = await db.collection('wallets').doc(String(userId)).get();
     if (!doc.exists) {
       return res.status(404).json({ error: 'Wallet not found' });
     }
 
     const wallet = doc.data();
-    const privateKeyHex = wallet.privateKey;
-    const seed = extractSeedFromPrivateKey(privateKeyHex);
+    const privateKey = wallet.privateKey; // Stored as hex (64-byte Ed25519 key)
+    const address = wallet.address;
 
+    // Extract 32-byte seed from 64-byte hex key
+    const seed = extractSeedFromPrivateKey(privateKey);
     if (!seed) {
       return res.status(400).json({ error: 'Invalid private key format' });
     }
 
-    const privateKeyBase64 = seed.toString('base64');
-    const address = wallet.address;
+    const privateKeyBase64 = seed.toString('base64'); 
+    console.log('PrivateKey Base64:', privateKeyBase64); 
 
-    // Fetch encrypted balance
+    // Request encrypted balance from Octra RPC
     const response = await axios.get(`${RPC_ENDPOINT}/view_encrypted_balance/${address}`, {
       headers: { 'X-Private-Key': privateKeyBase64 }
     });
 
-    const encryptedData = response.data?.encrypted_balance_raw;
-    if (!encryptedData || isNaN(encryptedData)) {
-      return res.status(200).json({ encrypted: 0 });
-    }
-
-    // Decrypt locally
-    const salt = Buffer.from('octra_encrypted_balance_v2');
-    const key = crypto.createHash('sha256').update(Buffer.concat([salt, seed])).digest().slice(0, 32);
-
     const rawEncoded = response.data?.encrypted_balance;
-    if (!rawEncoded || !rawEncoded.startsWith('v2|')) {
+    const encryptedRaw = response.data?.encrypted_balance_raw;
+
+    // Validate the response
+    if (!rawEncoded || !rawEncoded.startsWith('v2|') || !encryptedRaw || isNaN(encryptedRaw)) {
       return res.status(200).json({ encrypted: 0 });
     }
+
+    // Derive encryption key: sha256("octra_encrypted_balance_v2" + seed)
+    const salt = Buffer.from('octra_encrypted_balance_v2');
+    const key = crypto.createHash('sha256')
+      .update(Buffer.concat([salt, seed]))
+      .digest()
+      .slice(0, 32);
 
     try {
-      const b64 = rawEncoded.slice(3);
+      // Decode and decrypt
+      const b64 = rawEncoded.slice(3); // remove "v2|"
       const buffer = Buffer.from(b64, 'base64');
       const nonce = buffer.slice(0, 12);
       const ciphertext = buffer.slice(12);
+      const authTag = ciphertext.slice(-16);
+      const encrypted = ciphertext.slice(0, -16);
 
       const decipher = crypto.createDecipheriv('aes-256-gcm', key, nonce);
-      decipher.setAuthTag(ciphertext.slice(-16));
+      decipher.setAuthTag(authTag);
 
       const decrypted = Buffer.concat([
-        decipher.update(ciphertext.slice(0, -16)),
+        decipher.update(encrypted),
         decipher.final()
       ]);
 
       const decryptedAmount = parseInt(decrypted.toString());
-      return res.json({ encrypted: decryptedAmount / 1_000_000 }); // return OCT not μ
-    } catch (e) {
-      console.error('Decryption failed:', e);
+      const amountInOct = decryptedAmount / 1_000_000;
+
+      return res.json({ encrypted: amountInOct });
+    } catch (err) {
+      console.error('Decryption failed:', err);
       return res.status(200).json({ encrypted: 0 });
     }
 
