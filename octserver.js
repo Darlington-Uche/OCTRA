@@ -355,7 +355,7 @@ app.post('/send-tx', async (req, res) => {
       return res.status(400).json({ error: 'Missing or invalid fields' });
     }
 
-    // Get wallet
+    // Fetch wallet
     const doc = await db.collection('wallets').doc(String(userId)).get();
     if (!doc.exists) {
       return res.status(404).json({ error: 'Wallet not found' });
@@ -363,38 +363,37 @@ app.post('/send-tx', async (req, res) => {
 
     const wallet = doc.data();
 
-    // Decode private key (base64 seed format expected)
+    // Decode base64-encoded 32-byte Ed25519 seed
     const seed = Buffer.from(wallet.privateKey, 'base64');
     if (seed.length !== 32) {
-      return res.status(400).json({ error: 'Invalid private key format (expected base64-encoded 32-byte seed)' });
+      return res.status(400).json({ error: 'Invalid private key: expected base64-encoded 32-byte Ed25519 seed' });
     }
 
     const signingKey = nacl.sign.keyPair.fromSeed(seed);
 
-    // Get current nonce
-    let nonce;
+    // Step 1: Fetch nonce using your safe balance endpoint
+    let nonce = 0;
     try {
-      const { data } = await axios.get(`${RPC_ENDPOINT}/balance/${wallet.address}`);
-      nonce = parseInt(data.nonce ?? 0);
+      const balanceRes = await axios.get(`http://localhost:3000/get-balance/${wallet.address}`);
+      nonce = parseInt(balanceRes.data?.nonce ?? 0);
     } catch (err) {
-      console.error('Error getting nonce:', err.response?.data || err.message);
-      nonce = 0;
+      console.error('Failed to get nonce:', err.response?.data || err.message);
+      return res.status(500).json({ error: 'Unable to get current nonce from balance endpoint' });
     }
 
-    // Create transaction
     const μ = 1_000_000;
     const tx = {
       from: wallet.address,
       to_: recipient,
       amount: Math.round(amount * μ).toString(),
       nonce,
-      ou: "2", // medium fee tier
-      timestamp: Date.now() / 1000 + Math.random() * 0.01,
+      ou: amount < 1000 ? "1" : "3",
+      timestamp: Date.now() / 1000 + Math.random() * 0.01
     };
 
     if (message) tx.message = message;
 
-    // Sign transaction (excluding message)
+    // Sign (excluding message if not required)
     const txForSigning = JSON.stringify({
       from: tx.from,
       to_: tx.to_,
@@ -404,10 +403,7 @@ app.post('/send-tx', async (req, res) => {
       timestamp: tx.timestamp
     });
 
-    const signature = nacl.sign.detached(
-      Buffer.from(txForSigning),
-      signingKey.secretKey
-    );
+    const signature = nacl.sign.detached(Buffer.from(txForSigning), signingKey.secretKey);
 
     const signedTx = {
       ...tx,
@@ -415,11 +411,11 @@ app.post('/send-tx', async (req, res) => {
       public_key: Buffer.from(signingKey.publicKey).toString('base64')
     };
 
-    // Send transaction
+    // Send to Octra RPC
     const response = await axios.post(`${RPC_ENDPOINT}/send-tx`, signedTx);
 
     if (response.data.status === 'accepted') {
-      // Log transaction in Firestore
+      // Save to Firestore
       await db.collection('transactions').add({
         userId,
         txHash: response.data.tx_hash,
@@ -437,15 +433,19 @@ app.post('/send-tx', async (req, res) => {
         explorerUrl: `https://octrascan.io/tx/${response.data.tx_hash}`
       });
     } else {
-      return res.status(400).json({ error: 'Transaction rejected', details: response.data });
+      return res.status(400).json({
+        error: 'Transaction rejected by Octra RPC',
+        details: response.data
+      });
     }
-  } catch (error) {
-    const errMsg = error.response?.data || error.message;
-    console.error('Error sending transaction:', errMsg);
-    return res.status(500).json({ error: 'Failed to send transaction', details: errMsg });
+  } catch (err) {
+    console.error('Error sending transaction:', err.response?.data || err.message);
+    return res.status(500).json({
+      error: 'Internal error sending transaction',
+      details: err.response?.data || err.message
+    });
   }
 });
-
 // Update your existing get-keys endpoint
 app.get('/get-keys/:userId', async (req, res) => {
   try {
