@@ -853,41 +853,48 @@ app.get('/get-decrypted-balance/:userId', async (req, res) => {
 
     const wallet = doc.data();
     const address = wallet.address;
-    const privateKeyHex = wallet.privateKey;
+    const rawKey = wallet.privateKey;
 
-    console.log(`→ Address: ${address}`);
-    console.log(`→ Private Key (hex start): ${privateKeyHex.slice(0, 16)}...`);
+    let seed;
 
-    const fullKey = Buffer.from(privateKeyHex, 'hex');
-    const seed = fullKey.slice(0, 32);
-    const privateKeyBase64 = seed.toString('base64');
-
-    console.log(`→ Private Key (base64): ${privateKeyBase64}`);
-
-    const rpcUrl = `https://octra.network/view_encrypted_balance/${address}`;
-    console.log(`→ Calling RPC: ${rpcUrl}`);
-console.log(`→ Sending Header 'X-Private-Key': ${privateKeyBase64}`);
-
-    const response = await axios.get(`https://octra.network/view_encrypted_balance/${address}`, {
-  headers: {
-    'X-Private-Key': privateKeyBase64.trim()
-  },
-  timeout: 5000
-});
-
-    const { encrypted_balance } = response.data;
-
-    console.log(`→ RPC Response encrypted_balance: ${encrypted_balance}`);
-
-    if (!encrypted_balance || isNaN(Number(encrypted_balance))) {
-      console.warn(`→ Invalid or missing encrypted_balance`);
-      return res.json({ encrypted: "0" });
+    if (/^[0-9a-fA-F]{128}$/.test(rawKey)) {
+      seed = Buffer.from(rawKey.slice(0, 64), 'hex');
+    } else if (/^[0-9a-fA-F]{64}$/.test(rawKey)) {
+      seed = Buffer.from(rawKey, 'hex');
+    } else if (/^[A-Za-z0-9+/=]{44}$/.test(rawKey)) {
+      seed = Buffer.from(rawKey, 'base64');
+    } else {
+      console.error('→ Invalid private key format!');
+      return res.status(400).json({ error: 'Invalid private key format' });
     }
 
-    return res.json({ encrypted: encrypted_balance });
+    const privateKeyBase64 = seed.toString('base64');
+
+    const rpcUrl = `https://octra.network/view_encrypted_balance/${address}`;
+    const rpcHeaders = {
+      'X-Private-Key': privateKeyBase64,
+    };
+
+    // ✅ Log full request
+    console.log('→ Calling RPC with:');
+    console.log(`   URL: ${rpcUrl}`);
+    console.log(`   X-Private-Key: ${privateKeyBase64}`);
+    console.log(`   Derived Address: ${address}`);
+
+    const response = await axios.get(rpcUrl, {
+      headers: rpcHeaders,
+      timeout: 5000,
+    });
+
+    const encrypted = response.data?.encrypted_balance;
+
+    console.log(`→ RPC Response: encrypted_balance = ${encrypted}`);
+
+    return res.json({ encrypted: encrypted || '0.000000' });
 
   } catch (err) {
-    console.error(`[ERROR] RPC failed:`, err?.response?.data || err.message);
+    const errMsg = err?.response?.data || err.message;
+    console.error(`[ERROR] RPC failed:`, errMsg);
     return res.status(502).json({ error: 'Failed to contact Octra RPC' });
   }
 });
