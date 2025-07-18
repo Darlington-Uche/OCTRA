@@ -929,70 +929,37 @@ bot.action('tx_history', async (ctx) => {
     await ctx.reply('❌ Failed to load transactions. Please try again later.');
   }
 });
-// Handle private transaction button in Telegram bot
-bot.action('ptnx', async (ctx) => {
-  const userId = ctx.from.id;
-  
-  // Check if user has pending transactions to claim first
-  const pendingResponse = await callAPI(`/pending-private-tx/${userId}`, 'get', {}, userId);
-  
-  if (pendingResponse.pendingTransactions && pendingResponse.pendingTransactions.length > 0) {
-    // Show pending transactions with claim buttons
-    const buttons = pendingResponse.pendingTransactions.map(tx => (
-      [Markup.button.callback(
-        `🔒 ${tx.amount} OCT from ${tx.from.slice(0, 6)}...${tx.from.slice(-4)}`,
-        `claim_${tx.txHash}`
-      )]
-    ));
-    
-    buttons.push([Markup.button.callback('⬅️ Back', 'main_menu')]);
-    
-    await ctx.replyWithHTML(
-      `🔐 You have <b>${pendingResponse.pendingTransactions.length}</b> pending private transactions:\n\n` +
-      `Click on any to claim them to your wallet.`,
-      Markup.inlineKeyboard(buttons)
-    );
-  } else {
-    // No pending transactions, show send private form
-    await ctx.replyWithHTML(
-      '💱 <b>Send Private Transaction</b>\n\n' +
-      'Enter recipient address and amount in this format:\n' +
-      '<code>/private [address] [amount] [optional message]</code>\n\n' +
-      'Example:\n' +
-      '<code>/private octra1abc...xyz 10.5 "For coffee"</code>',
-      Markup.inlineKeyboard([
-        [Markup.button.callback('⬅️ Back', 'main_menu')]
-      ])
-    );
-  }
+
+//action click button
+bot.action('private', async (ctx) => {
+  await ctx.answerCbQuery();
+
+  const message = `
+🔐 <b>Private Transaction Guide</b>
+
+1️⃣ <b>Encrypt balance:</b>
+<code>/encrypt {amount}</code>
+
+2️⃣ <b>Decrypt balance:</b>
+<code>/decrypt {amount}</code>
+
+3️⃣ <b>Send private transaction:</b>
+<code>/private {address} {amount} {optional message}</code>
+
+<b>Example:</b>
+<code>/private oct123... 5 For lunch 🍱</code>
+
+Encrypted balance is required to send private transactions.
+`;
+
+  const sent = await ctx.reply(message, { parse_mode: 'HTML' });
+
+  // Auto-delete after 8 seconds
+  setTimeout(() => {
+    ctx.deleteMessage(sent.message_id).catch(() => {});
+  }, 8000);
 });
 
-// Handle claim button for private transactions
-bot.action(/^claim_(.+)/, async (ctx) => {
-  const userId = ctx.from.id;
-  const txHash = ctx.match[1];
-  
-  try {
-    const claimResponse = await callAPI('/claim-private-tx', 'post', { userId, txHash }, userId);
-    
-    if (claimResponse.success) {
-      await ctx.replyWithHTML(
-        `✅ Successfully claimed private transaction!\n\n` +
-        `🔗 <a href="${claimResponse.explorerUrl}">View on Octrascan</a>\n` +
-        `🔄 New balance will update shortly.`
-      );
-    } else {
-      await ctx.replyWithHTML(
-        `❌ Failed to claim transaction:\n<code>${claimResponse.error || 'Unknown error'}</code>`
-      );
-    }
-  } catch (error) {
-    console.error('Error claiming private tx:', error);
-    await ctx.reply('⚠️ An error occurred while claiming. Please try again.');
-  }
-  
-  await showMainMenu(ctx);
-});
 
 // Handle private transaction command
 bot.command('private', async (ctx) => {
