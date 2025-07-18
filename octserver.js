@@ -351,50 +351,59 @@ app.post('/send-tx', async (req, res) => {
   try {
     const { userId, recipient, amount, message } = req.body;
 
-if (!userId || !recipient || !amount) {
-  return res.status(400).json({ error: 'Missing required fields' });
-}
+    if (!userId || !recipient || !amount || isNaN(amount)) {
+      return res.status(400).json({ error: 'Missing or invalid fields' });
+    }
 
-// Convert userId to string to avoid Firestore error
-const doc = await db.collection('wallets').doc(String(userId)).get();
+    // Get wallet
+    const doc = await db.collection('wallets').doc(String(userId)).get();
     if (!doc.exists) {
       return res.status(404).json({ error: 'Wallet not found' });
     }
 
     const wallet = doc.data();
-    const privateKey = Buffer.from(wallet.privateKey, 'hex');
-    const signingKey = nacl.sign.keyPair.fromSeed(privateKey.slice(0, 32));
 
-    // Get current nonce
-    let currentNonce;
-    try {
-      const balanceResponse = await axios.get(`${RPC_ENDPOINT}/balance/${wallet.address}`);
-      currentNonce = balanceResponse.data.nonce || 0;
-    } catch (error) {
-      console.error('Error getting nonce:', error);
-      currentNonce = 0;
+    // Decode private key (base64 seed format expected)
+    const seed = Buffer.from(wallet.privateKey, 'base64');
+    if (seed.length !== 32) {
+      return res.status(400).json({ error: 'Invalid private key format (expected base64-encoded 32-byte seed)' });
     }
 
-    const txNonce = currentNonce + 1;
+    const signingKey = nacl.sign.keyPair.fromSeed(seed);
 
-    // Prepare transaction
+    // Get current nonce
+    let nonce;
+    try {
+      const { data } = await axios.get(`${RPC_ENDPOINT}/balance/${wallet.address}`);
+      nonce = parseInt(data.nonce ?? 0);
+    } catch (err) {
+      console.error('Error getting nonce:', err.response?.data || err.message);
+      nonce = 0;
+    }
+
+    // Create transaction
+    const μ = 1_000_000;
     const tx = {
       from: wallet.address,
       to_: recipient,
-      amount: Math.round(amount * 1000000).toString(), // octoshi
-      nonce: txNonce,
-      ou: amount < 1000 ? "1" : "3", // fee tier
-      timestamp: Date.now() / 1000 + Math.random() * 0.01
+      amount: Math.round(amount * μ).toString(),
+      nonce,
+      ou: "2", // medium fee tier
+      timestamp: Date.now() / 1000 + Math.random() * 0.01,
     };
 
-    if (message) {
-      tx.message = message;
-    }
+    if (message) tx.message = message;
 
-    // Sign transaction
-    const txForSigning = JSON.stringify(
-      Object.fromEntries(Object.entries(tx).filter(([k]) => k !== 'message'))
-    );
+    // Sign transaction (excluding message)
+    const txForSigning = JSON.stringify({
+      from: tx.from,
+      to_: tx.to_,
+      amount: tx.amount,
+      nonce: tx.nonce,
+      ou: tx.ou,
+      timestamp: tx.timestamp
+    });
+
     const signature = nacl.sign.detached(
       Buffer.from(txForSigning),
       signingKey.secretKey
@@ -410,32 +419,30 @@ const doc = await db.collection('wallets').doc(String(userId)).get();
     const response = await axios.post(`${RPC_ENDPOINT}/send-tx`, signedTx);
 
     if (response.data.status === 'accepted') {
-      // Record transaction in Firestore
+      // Log transaction in Firestore
       await db.collection('transactions').add({
         userId,
         txHash: response.data.tx_hash,
         from: wallet.address,
         to: recipient,
         amount,
-        nonce: txNonce,
+        nonce,
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
         status: 'pending'
       });
 
-      res.json({ 
+      return res.json({
         success: true,
         txHash: response.data.tx_hash,
         explorerUrl: `https://octrascan.io/tx/${response.data.tx_hash}`
       });
     } else {
-      res.status(400).json({ error: 'Transaction rejected', details: response.data });
+      return res.status(400).json({ error: 'Transaction rejected', details: response.data });
     }
   } catch (error) {
-    console.error('Error sending transaction:', error);
-    res.status(500).json({ 
-      error: 'Failed to send transaction',
-      details: error.response?.data || error.message 
-    });
+    const errMsg = error.response?.data || error.message;
+    console.error('Error sending transaction:', errMsg);
+    return res.status(500).json({ error: 'Failed to send transaction', details: errMsg });
   }
 });
 
