@@ -839,78 +839,35 @@ app.post('/decrypt-balance', async (req, res) => {
     return res.status(500).json({ error: 'Decrypt failed', details: err?.response?.data || err.message });
   }
 });
+
 app.get('/get-decrypted-balance/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
 
-    // Fetch wallet from Firestore
     const doc = await db.collection('wallets').doc(String(userId)).get();
     if (!doc.exists) {
       return res.status(404).json({ error: 'Wallet not found' });
     }
 
     const wallet = doc.data();
-    const privateKey = wallet.privateKey; // Stored as hex (64-byte Ed25519 key)
+    const privateKeyHex = wallet.privateKey;
     const address = wallet.address;
 
-    // Extract 32-byte seed from 64-byte hex key
-    const seed = extractSeedFromPrivateKey(privateKey);
-    if (!seed) {
-      return res.status(400).json({ error: 'Invalid private key format' });
-    }
+    const fullKey = Buffer.from(privateKeyHex, 'hex');
+    const seed = fullKey.slice(0, 32);
+    const privateKeyBase64 = seed.toString('base64');
 
-    const privateKeyBase64 = seed.toString('base64'); 
-    console.log('PrivateKey Base64:', privateKeyBase64); 
-
-    // Request encrypted balance from Octra RPC
-    const response = await axios.get(`${RPC_ENDPOINT}/view_encrypted_balance/${address}`, {
-      headers: { 'X-Private-Key': privateKeyBase64 }
+    const response = await axios.get(`https://octra.network/view_encrypted_balance/${address}`, {
+      headers: { 'X-Private-Key': privateKeyBase64 },
+      timeout: 5000
     });
 
-    const rawEncoded = response.data?.encrypted_balance;
-    const encryptedRaw = response.data?.encrypted_balance_raw;
+    const raw = response.data?.encrypted_balance_raw;
+    const encrypted = raw && !isNaN(raw) ? parseInt(raw, 10) / 1_000_000 : 0;
 
-    // Validate the response
-    if (!rawEncoded || !rawEncoded.startsWith('v2|') || !encryptedRaw || isNaN(encryptedRaw)) {
-      return res.status(200).json({ encrypted: 0 });
-    }
-
-    // Derive encryption key: sha256("octra_encrypted_balance_v2" + seed)
-    const salt = Buffer.from('octra_encrypted_balance_v2');
-    const key = crypto.createHash('sha256')
-      .update(Buffer.concat([salt, seed]))
-      .digest()
-      .slice(0, 32);
-
-    try {
-      // Decode and decrypt
-      const b64 = rawEncoded.slice(3); // remove "v2|"
-      const buffer = Buffer.from(b64, 'base64');
-      const nonce = buffer.slice(0, 12);
-      const ciphertext = buffer.slice(12);
-      const authTag = ciphertext.slice(-16);
-      const encrypted = ciphertext.slice(0, -16);
-
-      const decipher = crypto.createDecipheriv('aes-256-gcm', key, nonce);
-      decipher.setAuthTag(authTag);
-
-      const decrypted = Buffer.concat([
-        decipher.update(encrypted),
-        decipher.final()
-      ]);
-
-      const decryptedAmount = parseInt(decrypted.toString());
-      const amountInOct = decryptedAmount / 1_000_000;
-
-      return res.json({ encrypted: amountInOct });
-    } catch (err) {
-      console.error('Decryption failed:', err);
-      return res.status(200).json({ encrypted: 0 });
-    }
-
-  } catch (err) {
-    console.error('Decrypted balance fetch error:', err?.response?.data || err.message);
-    return res.status(500).json({ error: 'Failed to fetch decrypted balance' });
+    return res.json({ encrypted });
+  } catch {
+    return res.status(502).json({ error: 'Failed to contact Octra RPC' });
   }
 });
 
