@@ -843,30 +843,48 @@ app.post('/decrypt-balance', async (req, res) => {
 app.get('/get-decrypted-balance/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
+    console.log(`[GET] /get-decrypted-balance/${userId}`);
 
     const doc = await db.collection('wallets').doc(String(userId)).get();
     if (!doc.exists) {
+      console.warn(`→ Wallet not found for userId: ${userId}`);
       return res.status(404).json({ error: 'Wallet not found' });
     }
 
     const wallet = doc.data();
-    const privateKeyHex = wallet.privateKey;
     const address = wallet.address;
+    const privateKeyHex = wallet.privateKey;
+
+    console.log(`→ Address: ${address}`);
+    console.log(`→ Private Key (hex start): ${privateKeyHex.slice(0, 16)}...`);
 
     const fullKey = Buffer.from(privateKeyHex, 'hex');
     const seed = fullKey.slice(0, 32);
     const privateKeyBase64 = seed.toString('base64');
 
-    const response = await axios.get(`https://octra.network/view_encrypted_balance/${address}`, {
+    console.log(`→ Private Key (base64): ${privateKeyBase64}`);
+
+    const rpcUrl = `https://octra.network/view_encrypted_balance/${address}`;
+    console.log(`→ Calling RPC: ${rpcUrl}`);
+
+    const response = await axios.get(rpcUrl, {
       headers: { 'X-Private-Key': privateKeyBase64 },
       timeout: 5000
     });
 
-    const raw = response.data?.encrypted_balance_raw;
-    const encrypted = raw && !isNaN(raw) ? parseInt(raw, 10) / 1_000_000 : 0;
+    const { encrypted_balance } = response.data;
 
-    return res.json({ encrypted });
-  } catch {
+    console.log(`→ RPC Response encrypted_balance: ${encrypted_balance}`);
+
+    if (!encrypted_balance || isNaN(Number(encrypted_balance))) {
+      console.warn(`→ Invalid or missing encrypted_balance`);
+      return res.json({ encrypted: "0" });
+    }
+
+    return res.json({ encrypted: encrypted_balance });
+
+  } catch (err) {
+    console.error(`[ERROR] RPC failed:`, err?.response?.data || err.message);
     return res.status(502).json({ error: 'Failed to contact Octra RPC' });
   }
 });
