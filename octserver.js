@@ -355,33 +355,47 @@ app.post('/send-tx', async (req, res) => {
       return res.status(400).json({ error: 'Missing or invalid fields' });
     }
 
-    // Fetch wallet
     const doc = await db.collection('wallets').doc(String(userId)).get();
     if (!doc.exists) {
       return res.status(404).json({ error: 'Wallet not found' });
     }
 
     const wallet = doc.data();
+    const μ = 1_000_000;
 
-    // Decode base64-encoded 32-byte Ed25519 seed
-    const seed = Buffer.from(wallet.privateKey, 'base64');
-    if (seed.length !== 32) {
-      return res.status(400).json({ error: 'Invalid private key: expected base64-encoded 32-byte Ed25519 seed' });
+    // === Private Key Parsing (base64 or hex)
+    let seed;
+    try {
+      if (wallet.privateKey.endsWith('=')) {
+        // base64-encoded 32-byte Ed25519 seed
+        seed = Buffer.from(wallet.privateKey, 'base64');
+      } else {
+        // hex-encoded 64-byte full private key
+        const fullKey = Buffer.from(wallet.privateKey, 'hex');
+        seed = fullKey.slice(0, 32);
+      }
+      if (seed.length !== 32) {
+        throw new Error('Invalid private key seed length');
+      }
+    } catch (e) {
+      return res.status(400).json({ error: 'Invalid private key format' });
     }
 
     const signingKey = nacl.sign.keyPair.fromSeed(seed);
 
-    // Step 1: Fetch nonce using your safe balance endpoint
-    let nonce = 0;
+    // === Get nonce using safe local endpoint
+    let currentNonce = 0;
     try {
-      const balanceRes = await axios.get(`http://localhost:3000/get-balance/${wallet.address}`);
-      nonce = parseInt(balanceRes.data?.nonce ?? 0);
+      const balanceRes = await axios.get(`${RPC_ENDPOINT}/get-balance/${wallet.address}`);
+      currentNonce = parseInt(balanceRes.data?.nonce ?? 0);
     } catch (err) {
-      console.error('Failed to get nonce:', err.response?.data || err.message);
-      return res.status(500).json({ error: 'Unable to get current nonce from balance endpoint' });
+      console.error('❌ Failed to fetch nonce:', err.response?.data || err.message);
+      return res.status(500).json({ error: 'Unable to fetch current nonce' });
     }
 
-    const μ = 1_000_000;
+    const nonce = currentNonce + 1;
+
+    // === Build transaction
     const tx = {
       from: wallet.address,
       to_: recipient,
@@ -393,7 +407,7 @@ app.post('/send-tx', async (req, res) => {
 
     if (message) tx.message = message;
 
-    // Sign (excluding message if not required)
+    // === Prepare signature
     const txForSigning = JSON.stringify({
       from: tx.from,
       to_: tx.to_,
@@ -411,11 +425,10 @@ app.post('/send-tx', async (req, res) => {
       public_key: Buffer.from(signingKey.publicKey).toString('base64')
     };
 
-    // Send to Octra RPC
+    // === Submit to Octra RPC
     const response = await axios.post(`${RPC_ENDPOINT}/send-tx`, signedTx);
 
     if (response.data.status === 'accepted') {
-      // Save to Firestore
       await db.collection('transactions').add({
         userId,
         txHash: response.data.tx_hash,
@@ -438,14 +451,16 @@ app.post('/send-tx', async (req, res) => {
         details: response.data
       });
     }
+
   } catch (err) {
-    console.error('Error sending transaction:', err.response?.data || err.message);
+    console.error('❌ Error sending tx:', err.response?.data || err.message);
     return res.status(500).json({
       error: 'Internal error sending transaction',
       details: err.response?.data || err.message
     });
   }
 });
+
 // Update your existing get-keys endpoint
 app.get('/get-keys/:userId', async (req, res) => {
   try {
