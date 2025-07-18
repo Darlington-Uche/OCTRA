@@ -112,39 +112,66 @@ app.post('/send-multi', async (req, res) => {
     if (!doc.exists) return res.status(404).json({ error: 'Wallet not found' });
 
     const wallet = doc.data();
-    const privateKey = Buffer.from(wallet.privateKey, 'hex');
-    const signingKey = nacl.sign.keyPair.fromSeed(privateKey.slice(0, 32));
 
-    // Get current nonce
-    let baseNonce = 0;
+    // Decode private key (either base64 seed or hex full key)
+    let seed;
     try {
-      const resNonce = await axios.get(`${RPC_ENDPOINT}/balance/${wallet.address}`);
-      baseNonce = resNonce.data.nonce || 0;
-    } catch (err) {
-      return res.status(500).json({ error: 'Failed to get nonce', details: err.message });
+      if (/=+$/.test(wallet.privateKey)) {
+        // base64-encoded 32-byte seed
+        seed = Buffer.from(wallet.privateKey, 'base64');
+      } else {
+        // full 64-byte hex private key
+        const buf = Buffer.from(wallet.privateKey, 'hex');
+        seed = buf.slice(0, 32);
+      }
+    } catch (e) {
+      return res.status(400).json({ error: 'Invalid private key format' });
     }
 
-    // Build transactions
+    if (seed.length !== 32) {
+      return res.status(400).json({ error: 'Expected 32-byte seed for Ed25519 key' });
+    }
+
+    const signingKey = nacl.sign.keyPair.fromSeed(seed);
+
+    // === Get base nonce from RPC
+    let baseNonce = 0;
+    try {
+      const nonceRes = await axios.get(`${RPC_ENDPOINT}/balance/${wallet.address}`);
+      baseNonce = parseInt(nonceRes.data?.nonce ?? 0);
+    } catch (err) {
+      console.error('Failed to get nonce from RPC:', err.response?.data || err.message);
+      return res.status(500).json({ error: 'Failed to fetch nonce from RPC' });
+    }
+
+    // === Send transactions
+    const μ = 1_000_000;
     const txResults = [];
+
     for (let i = 0; i < recipients.length; i++) {
       const { address, amount } = recipients[i];
-      const txNonce = baseNonce + 1 + i;
+      const nonce = baseNonce + 1 + i;
 
       const tx = {
         from: wallet.address,
         to_: address,
-        amount: Math.round(amount * 1e6).toString(),
-        nonce: txNonce,
+        amount: Math.round(amount * μ).toString(),
+        nonce,
         ou: amount < 1000 ? "1" : "3",
         timestamp: Date.now() / 1000 + Math.random() * 0.01
       };
 
-      const txForSigning = JSON.stringify(
-        Object.fromEntries(Object.entries(tx).filter(([k]) => k !== 'message'))
-      );
+      // Sign
+      const txForSigning = JSON.stringify({
+        from: tx.from,
+        to_: tx.to_,
+        amount: tx.amount,
+        nonce: tx.nonce,
+        ou: tx.ou,
+        timestamp: tx.timestamp
+      });
 
       const signature = nacl.sign.detached(Buffer.from(txForSigning), signingKey.secretKey);
-
       const signedTx = {
         ...tx,
         signature: Buffer.from(signature).toString('base64'),
@@ -160,29 +187,39 @@ app.post('/send-multi', async (req, res) => {
             from: wallet.address,
             to: address,
             amount,
-            nonce: txNonce,
+            nonce,
             timestamp: admin.firestore.FieldValue.serverTimestamp(),
             status: 'pending'
           });
 
-          txResults.push({ success: true, txHash: resTx.data.tx_hash, recipient: address });
+          txResults.push({
+            success: true,
+            txHash: resTx.data.tx_hash,
+            nonce,
+            recipient: address
+          });
         } else {
-          txResults.push({ success: false, error: resTx.data, recipient: address });
+          txResults.push({
+            success: false,
+            error: resTx.data,
+            recipient: address
+          });
         }
       } catch (err) {
-        txResults.push({ success: false, error: err.message, recipient: address });
+        txResults.push({
+          success: false,
+          error: err.response?.data || err.message,
+          recipient: address
+        });
       }
 
-      // Optional short delay to reduce node overload
-      await new Promise(res => setTimeout(res, 300));
+      // Optional delay
+      await new Promise(resolve => setTimeout(resolve, 300));
     }
 
-    const failed = txResults.filter(r => !r.success);
-    const successful = txResults.filter(r => r.success);
-
     res.json({
-      successCount: successful.length,
-      failedCount: failed.length,
+      successCount: txResults.filter(r => r.success).length,
+      failedCount: txResults.filter(r => !r.success).length,
       results: txResults
     });
 
