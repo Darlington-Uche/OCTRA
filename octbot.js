@@ -53,7 +53,7 @@ async function getServerWithSpeed(userId) {
 
           // Now test speed with actual /server-status
           const start = Date.now();
-          await axios.get(`${url}/server-status`, { timeout: 10000 });
+          await axios.get(`${url}/server-status`, { timeout: 100000 });
           const speed = Math.min(100, Math.round(1000 / (Date.now() - start)));
 
           return { url, speed };
@@ -325,7 +325,9 @@ async function showMainMenu(ctx) {
         Markup.button.callback('private TNX', 'private'),
         Markup.button.callback('🌀Switch wallet', 'switch_wallet')
       ],
-      [Markup.button.callback('Claim Secret 🔐', 'claim_secret')]
+      [Markup.button.callback('Claim Secret 🔐', 'claim_secret'),
+       Markup.button.callback('STAKE OCTRA', 'stake')
+      ]
     ])
   );
 }
@@ -513,6 +515,35 @@ bot.on('text', async (ctx) => {
     );
     await ctx.deleteMessage();
   }
+  else if (session.step === 'await_stake_amount') {
+  const amount = parseFloat(ctx.message.text);
+  const days = session.stakeDays;
+
+  if (isNaN(amount) || amount <= 0) {
+    return ctx.reply('❌ Please enter a valid positive number for staking amount.');
+  }
+
+  // Optional: Check balance if you've stored it
+  const balance = session.balance || 0;
+  if (amount > balance) {
+    return ctx.reply(`❌ Insufficient balance. Your balance: ${balance} OCT`);
+  }
+
+  const stakeRes = await callAPI('/stake', 'post', {
+    userId: ctx.from.id,
+    amount,
+    days
+  });
+if (stakeRes && stakeRes.success) {
+    await ctx.reply(`✅ Successfully staked ${amount} OCT for ${days} days.\nTransaction: ${stakeRes.txHash}`);
+} else {
+    const errorMsg = stakeRes?.error || 'Unknown error (stakeRes is undefined)';
+    await ctx.reply(`❌ Staking failed: ${errorMsg}`);
+}
+
+  session.step = null; // Clear session or reset to main menu
+  await ctx.deleteMessage();
+}
   else if (session.step === 'await_multi_addresses') {
     // Handle multi-send address input
     const addresses = ctx.message.text.split(/[\n,]+/).map(addr => addr.trim()).filter(addr => addr.startsWith('oct'));
@@ -1051,6 +1082,81 @@ bot.action('switch_server', async (ctx) => {
   } catch (err) {
     await ctx.answerCbQuery(`⚠️ ${SERVER_NAMES[nextServer]} unavailable, try again`);
   }
+});
+
+bot.action('stake', async (ctx) => {
+    const userId = ctx.from.id;
+
+    // Fetch wallet, balance, and current staking info
+    const walletInfo = await callAPI(`/get-user-info/${userId}`, 'get');
+    const balanceInfo = await callAPI(`/get-balance/${walletInfo.address}`, 'get');
+    const stakingInfo = await callAPI(`/staking-info/${userId}`, 'get');
+
+    const totalStakedGlobal = stakingInfo?.totalStakedGlobal ?? 0;
+    const userStake = stakingInfo?.userStake;
+
+    if (userStake && userStake.expiresAt > Date.now()) {
+        const responseText = 
+`━━━━━━━━━━━━━━━━━━━━━━
+<b>🚫 ACTIVE STAKE DETECTED</b>
+━━━━━━━━━━━━━━━━━━━━━━
+
+🧍 <b>User:</b> @${ctx.from.username || 'Unknown'}
+💰 <b>Current Stake:</b> ${userStake.amount} OCT
+📆 <b>Duration:</b> ${userStake.days} days
+⏳ <b>Expires On:</b> ${new Date(userStake.expiresAt).toLocaleString()}
+
+━━━━━━━━━━━━━━━━━━━━━━
+🌐 <b>Global Staking Pool:</b> ${totalStakedGlobal} OCT
+━━━━━━━━━━━━━━━━━━━━━━
+
+<i>👉 You can only stake again after your current stake expires.</i>`;
+
+        return ctx.replyWithHTML(responseText);
+    }
+
+    const stakingPanelText = 
+`━━━━━━━━━━━━━━━━━━━━━━
+<b>📈 STAKING PANEL</b>
+━━━━━━━━━━━━━━━━━━━━━━
+
+💰 <b>Your Balance:</b> ${balanceInfo.balance} OCT
+🌐 <b>Total Staked Globally:</b> ${totalStakedGlobal} OCT
+
+━━━━━━━━━━━━━━━━━━━━━━
+<b>📢 DISCLAIMER</b>
+━━━━━━━━━━━━━━━━━━━━━━
+<i>Users who staked earlier will earn more from the pool rewards!</i>
+
+━━━━━━━━━━━━━━━━━━━━━━
+<b>⚡ You have not staked yet!</b>
+━━━━━━━━━━━━━━━━━━━━━━
+
+<i>👇 Select your staking plan duration below:</i>`;
+
+    await ctx.replyWithHTML(stakingPanelText, {
+        reply_markup: {
+            inline_keyboard: [
+                [{ text: '1 Day', callback_data: 'stake_plan_1' }, { text: '2 Days', callback_data: 'stake_plan_2' }],
+                [{ text: '5 Days', callback_data: 'stake_plan_5' }, { text: '7 Days', callback_data: 'stake_plan_7' }],
+                [{ text: '10 Days', callback_data: 'stake_plan_10' }]
+            ]
+        }
+    });
+});
+
+
+// Handle Plan Selection
+bot.action(/^stake_plan_(\d+)$/, async (ctx) => {
+  const userId = ctx.from.id;
+  const days = parseInt(ctx.match[1]);
+
+  if (!sessions[userId]) sessions[userId] = {};
+  sessions[userId].stakeDays = days;
+  sessions[userId].step = 'await_stake_amount';
+
+  await ctx.reply(`📥 Enter the amount of OCT you want to stake for ${days} days:`);
+  await ctx.deleteMessage();
 });
 
 

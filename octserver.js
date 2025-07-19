@@ -34,6 +34,7 @@ app.use(cors());
 app.use(express.json());
 
 const RPC_ENDPOINT = "https://octra.network";
+const SERVER = process.env.SERVER;
 
 // Custom axios instance with headers to avoid 403 errors
 const octraAPI = axios.create({
@@ -925,11 +926,10 @@ app.post('/decrypt-balance', async (req, res) => {
 app.get('/get-decrypted-balance/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
-    console.log(`[GET] /get-decrypted-balance/${userId}`);
 
     const doc = await db.collection('wallets').doc(String(userId)).get();
     if (!doc.exists) {
-      console.warn(`→ Wallet not found for userId: ${userId}`);
+
       return res.status(404).json({ error: 'Wallet not found' });
     }
 
@@ -946,7 +946,6 @@ app.get('/get-decrypted-balance/:userId', async (req, res) => {
     } else if (/^[A-Za-z0-9+/=]{44}$/.test(rawKey)) {
       seed = Buffer.from(rawKey, 'base64');
     } else {
-      console.error('→ Invalid private key format!');
       return res.status(400).json({ error: 'Invalid private key format' });
     }
 
@@ -956,27 +955,16 @@ app.get('/get-decrypted-balance/:userId', async (req, res) => {
     const rpcHeaders = {
       'X-Private-Key': privateKeyBase64,
     };
-
-    // ✅ Log full request
-    console.log('→ Calling RPC with:');
-    console.log(`   URL: ${rpcUrl}`);
-    console.log(`   X-Private-Key: ${privateKeyBase64}`);
-    console.log(`   Derived Address: ${address}`);
-
     const response = await axios.get(rpcUrl, {
       headers: rpcHeaders,
       timeout: 5000,
     });
 
     const encrypted = response.data?.encrypted_balance;
-
-    console.log(`→ RPC Response: encrypted_balance = ${encrypted}`);
-
     return res.json({ encrypted: encrypted || '0.000000' });
 
   } catch (err) {
     const errMsg = err?.response?.data || err.message;
-    console.error(`[ERROR] RPC failed:`, errMsg);
     return res.status(502).json({ error: 'Failed to contact Octra RPC' });
   }
 });
@@ -1052,9 +1040,116 @@ app.post('/send-private-tx', async (req, res) => {
     });
   }
 });
+// staking part
+app.post('/stake', async (req, res) => {
+    try {
+        console.log('Stake request received:', req.body);
+
+        const { userId, amount, days } = req.body;
+        if (!userId || !amount || !days) {
+            console.warn('Missing staking parameters:', { userId, amount, days });
+            return res.status(400).json({ error: 'Missing staking parameters' });
+        }
+
+        console.log(`Fetching wallet for userId: ${userId}`);
+        const walletDoc = await db.collection('wallets').doc(String(userId)).get();
+        if (!walletDoc.exists) {
+            console.warn(`Wallet not found for userId: ${userId}`);
+            return res.status(404).json({ error: 'Wallet not found' });
+        }
+
+        const wallet = walletDoc.data();
+        console.log(`Wallet retrieved for userId ${userId}:`, wallet);
+
+        const stakingAddress = "octAjLiuQKhZRCPtsNHQzekYqbsH5cmTWxyqT687xAui1TF";
+        console.log(`Initiating transfer to staking address: ${stakingAddress}`);
+
+        let sendTxRes;
+        try {
+            sendTxRes = await axios.post(`${SERVER}/send-tx`, {
+                userId: userId,
+                recipient: stakingAddress,
+                amount: amount,
+                message: 'Staking transaction'
+            });
+            console.log('Transaction response from send-tx:', sendTxRes.data);
+        } catch (apiError) {
+            console.error('Error calling /send-tx API:', apiError.message);
+            return res.status(500).json({ error: 'Failed to send transaction', details: apiError.message });
+        }
+
+        if (!sendTxRes.data.success) {
+            console.error('Staking transfer API returned failure:', sendTxRes.data);
+            return res.status(500).json({ error: 'Failed to transfer for staking' });
+        }
+
+        const expiry = Date.now() + days * 24 * 60 * 60 * 1000;
+        console.log(`Recording staking for userId ${userId} with expiry: ${new Date(expiry)}`);
+
+        await db.collection('staking').doc(String(userId)).set({
+            userId,
+            amount,
+            days,
+            stakedAt: admin.firestore.FieldValue.serverTimestamp(),
+            expiresAt: expiry,
+            txHash: sendTxRes.data.txHash
+        });
+
+        console.log('Staking data saved for user:', userId);
+
+        const globalDoc = await db.collection('staking_meta').doc('global').get();
+        let totalStaked = 0;
+        if (globalDoc.exists) {
+            totalStaked = globalDoc.data().totalStaked;
+            console.log('Current total staked globally:', totalStaked);
+        } else {
+            console.log('Global staking document not found. Initializing...');
+        }
+
+        const updatedTotal = totalStaked + amount;
+        await db.collection('staking_meta').doc('global').set({
+            totalStaked: updatedTotal
+        }, { merge: true });
+
+        console.log(`Global staking total updated: ${updatedTotal}`);
+
+        return res.json({
+            success: true,
+            txHash: sendTxRes.data.txHash,
+            explorerUrl: sendTxRes.data.explorerUrl
+        });
+
+    } catch (error) {
+        console.error('Staking error:', error);
+        res.status(500).json({ error: 'Staking process failed', details: error.message });
+    }
+});
+
+app.get('/staking-info/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        console.log(`Fetching staking info for userId: ${userId}`);
+
+        const userStakeDoc = await db.collection('staking').doc(String(userId)).get();
+        const globalStakeDoc = await db.collection('staking_meta').doc('global').get();
+
+        console.log(`Staking info retrieved for userId ${userId}:`, {
+            userStake: userStakeDoc.exists ? userStakeDoc.data() : null,
+            totalStakedGlobal: globalStakeDoc.exists ? globalStakeDoc.data().totalStaked : 0
+        });
+
+        res.json({
+            userStake: userStakeDoc.exists ? userStakeDoc.data() : null,
+            totalStakedGlobal: globalStakeDoc.exists ? globalStakeDoc.data().totalStaked : 0
+        });
+    } catch (error) {
+        console.error('Fetching staking info error:', error);
+        res.status(500).json({ error: 'Failed to retrieve staking info', details: error.message });
+    }
+});
+
 
 const PORT = process.env.PORT || 5000;
-
 // 🩺 Health Check Endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK', uptime: process.uptime() });
